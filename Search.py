@@ -13,15 +13,17 @@ plugin_widgets = []
 # Variable to store the text input widget
 prompt_input = None
 
-# Function to search layers by name
-def find_layer(layer, layer_name):
+# Function to search layers by prefix
+def find_layer(layer, prefix):
     found_layers = []
-    if layer.get_name() == layer_name:
+    layer_name = layer.get_name().lower()  # Convert to lowercase
+    if layer_name.startswith(prefix.lower()):  # Check if the name starts with the prefix
         found_layers.append(layer)
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
-            found_layers.extend(find_layer(sub_layer, layer_name))
+            found_layers.extend(find_layer(sub_layer, prefix))
+
     return found_layers
 
 # Define the plugin's main functionality
@@ -32,7 +34,8 @@ def start_plugin():
         print("[Python] UI is already created.")
 
 def handle_text_change(user_prompt):
-    if not user_prompt.strip():  # Ignore empty or whitespace-only inputs
+    user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
+    if not user_prompt:  # Ignore empty or whitespace-only inputs
         print("[Python] Empty prompt. Waiting for user input.")
         return
 
@@ -42,7 +45,6 @@ def handle_text_change(user_prompt):
         print("No active texture set stack found.")
         return
 
-    # Search for the layers named in the prompt
     all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
     all_found = []
 
@@ -65,6 +67,9 @@ def handle_text_change(user_prompt):
         # Update the UI to display zero counts if no layers are found
         count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         print(f"Layer named '{user_prompt}' not found.")
+
+        # Deselect any currently selected layers
+        substance_painter.layerstack.set_selected_nodes([])
 
 # Define the function to close the plugin UI
 
@@ -134,7 +139,6 @@ def close_plugin():
     
 
 # Create the UI for the plugin
-
 
 def initialize_plugin():
     print("[Python] Initializing plugin...")
