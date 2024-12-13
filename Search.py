@@ -50,25 +50,26 @@ def handle_text_change(user_prompt):
         all_found.extend(find_layer(layer, user_prompt))
 
     if all_found:
+        fill_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.FillLayer)
+        paint_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.PaintLayer)
+        folder_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer)
+
+        # Update the UI with the counts
+        count_display.setText(f"Fill Layers: {fill_count}, Paint Layers: {paint_count}, Group Folders: {folder_count}")
+
         # Use set_selected_nodes to select the found layers
         substance_painter.layerstack.set_selected_nodes(all_found)
         for layer in all_found:
             print(f"Selected and marked layer named '{user_prompt}': {layer.get_name()}")
     else:
+        # Update the UI to display zero counts if no layers are found
+        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         print(f"Layer named '{user_prompt}' not found.")
 
 # Define the function to close the plugin UI
 
-def close_plugin():
-    for widget in plugin_widgets:
-        substance_painter.ui.delete_ui_element(widget)
-    plugin_widgets.clear()
-    
-
-# Create the UI for the plugin
-
 def create_ui():
-    global prompt_input  # Access the global prompt_input variable
+    global prompt_input, count_display  # Access the global variables
 
     if prompt_input is not None:
         print("[Python] UI is already created.")
@@ -76,24 +77,34 @@ def create_ui():
 
     # Create a widget to serve as the main window
     main_widget = QtWidgets.QWidget()
-    main_widget.setWindowTitle("Prompt Plugin")
+    main_widget.setWindowTitle("Name Search")
 
     # Create a vertical layout for the window
     main_layout = QtWidgets.QVBoxLayout(main_widget)
-
-    # Add a label
-    label = QtWidgets.QLabel("Enter your prompt:")
-    label.setAlignment(QtCore.Qt.AlignCenter)  # Center-align the label
-    main_layout.addWidget(label)
 
     # Add a text input field
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
     prompt_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-
-    # Connect the textChanged signal to handle_text_change
     prompt_input.textChanged.connect(handle_text_change)
     main_layout.addWidget(prompt_input)
+
+    # Create a toggle button to show/hide counts
+    toggle_button = QtWidgets.QPushButton("Hide Stats")
+    toggle_button.setCheckable(True)  # Enable toggling
+    toggle_button.clicked.connect(lambda: toggle_counts_visibility(toggle_button))
+    main_layout.addWidget(toggle_button)
+
+    # Create a collapsible UI element for counts
+    count_layout = QtWidgets.QVBoxLayout()
+
+    # Display for counts
+    count_display = QtWidgets.QLabel("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
+    count_display.setAlignment(QtCore.Qt.AlignCenter)  # Center-align the label
+    count_layout.addWidget(count_display)
+
+    # Add the count display layout directly
+    main_layout.addLayout(count_layout)
 
     # Add a spacer to push elements to the center of the window
     main_layout.addStretch()
@@ -105,7 +116,25 @@ def create_ui():
     plugin_widgets.append(main_widget)
 
     print("[Python] UI created successfully.")
-# Initialize the plugin
+
+def toggle_counts_visibility(button):
+    """Toggle the visibility of count display."""
+    count_display = button.parent().findChild(QtWidgets.QLabel)
+    if count_display.isVisible():
+        count_display.setVisible(False)
+        button.setText("Show Stats")
+    else:
+        count_display.setVisible(True)
+        button.setText("Hide Stats")
+          
+def close_plugin():
+    for widget in plugin_widgets:
+        substance_painter.ui.delete_ui_element(widget)
+    plugin_widgets.clear()
+    
+
+# Create the UI for the plugin
+
 
 def initialize_plugin():
     print("[Python] Initializing plugin...")
