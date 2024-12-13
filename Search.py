@@ -50,8 +50,10 @@ def handle_text_change(user_prompt):
         all_found.extend(find_layer(layer, user_prompt))
 
     if all_found:
+        # Use set_selected_nodes to select the found layers
+        substance_painter.layerstack.set_selected_nodes(all_found)
         for layer in all_found:
-            print(f"Found layer named '{user_prompt}': {layer.get_name()}")
+            print(f"Selected and marked layer named '{user_prompt}': {layer.get_name()}")
     else:
         print(f"Layer named '{user_prompt}' not found.")
 
