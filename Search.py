@@ -6,21 +6,34 @@ import substance_painter.layerstack
 from PySide2 import QtGui
 from PySide2 import QtWidgets
 
+# List to store plugin widgets
 plugin_widgets = []
 
+# Variable to store the text input widget
+prompt_input = None
+
+# Function to search layers by name
 def find_layer(layer, layer_name):
     found_layers = []
-
     if layer.get_name() == layer_name:
         found_layers.append(layer)
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
             found_layers.extend(find_layer(sub_layer, layer_name))
-
     return found_layers
 
+# Define the plugin's main functionality
 def start_plugin():
+    global prompt_input  # Access the global prompt_input variable
+
+    if not prompt_input:
+        # Ensure UI is created before proceeding
+        print("[Python] UI has not been created. Initializing now.")
+        create_ui()  # Create the UI if it hasn't been initialized
+        return
+
+    user_prompt = prompt_input.text()  # Get the text from the input field
     stack = substance_painter.textureset.get_active_stack()
 
     if not stack:
@@ -32,40 +45,66 @@ def start_plugin():
     all_found = []
 
     for layer in all_layers:
-        all_found.extend(find_layer(layer, "test"))
+        all_found.extend(find_layer(layer, user_prompt))
 
     if all_found:
         for layer in all_found:
-            print(f"Found layer named 'test': {layer.get_name()}")
+            print(f"Found layer named '{user_prompt}': {layer.get_name()}")
     else:
-        print("Layer named 'test' not found.")
+        print(f"Layer named '{user_prompt}' not found.")
+# Define the function to close the plugin UI
 
 def close_plugin():
-    """Cleans up the plugin by removing UI elements."""
     for widget in plugin_widgets:
         substance_painter.ui.delete_ui_element(widget)
     plugin_widgets.clear()
 
-# Function to create the UI button
+# Create the UI for the plugin
 def create_ui():
-    global plugin_widgets
+    global prompt_input  # Access the global prompt_input variable
 
-    # Create a main window for the plugin
-    window = substance_painter.ui.create_ui_element('Panel', "Layer Search Plugin", size=(200, 100))
-    plugin_widgets.append(window)
+    # Avoid recreating the UI if it already exists
+    if prompt_input is not None:
+        print("[Python] UI is already created.")
+        return
 
-    # Create a button inside the window
-    button = substance_painter.ui.create_ui_element('Button', "Search Layers", parent=window)
-    button.clicked.connect(start_plugin)
+    # Create a widget to serve as the main window
+    main_widget = QtWidgets.QWidget()
+    main_widget.setWindowTitle("Prompt Plugin")
 
-    # Add the panel to the Tools section of the UI
-    substance_painter.ui.add_tool('Layer Search Plugin', window)
+    # Create a vertical layout for the window
+    layout = QtWidgets.QVBoxLayout()
 
-    return window
+    # Add a label
+    label = QtWidgets.QLabel("Enter your prompt:")
+    layout.addWidget(label)
 
-def start_plugin_with_ui():
-    # Add the UI elements
-    create_ui()
+    # Add a text input field
+    prompt_input = QtWidgets.QLineEdit()
+    prompt_input.setPlaceholderText("Type your prompt here...")
+    layout.addWidget(prompt_input)
+
+    # Add a button to execute the start_plugin function
+    find_button = QtWidgets.QPushButton("Find")
+    find_button.clicked.connect(start_plugin)  # No argument passed here
+    layout.addWidget(find_button)
+
+    # Set the layout to the main widget
+    main_widget.setLayout(layout)
+
+    # Show the widget in Substance Painter
+    substance_painter.ui.add_dock_widget(main_widget)
+
+    # Keep track of the widget so it can be closed later
+    plugin_widgets.append(main_widget)
+
+    print("[Python] UI created successfully.")
+
+# Initialize the plugin
+def initialize_plugin():
+    print("[Python] Initializing plugin...")
+    create_ui()  # Ensure the UI is created at plugin initialization
+    print("[Python] Plugin initialized.")
 
 if __name__ == "__main__":
-    start_plugin_with_ui()
+    initialize_plugin()
