@@ -37,6 +37,7 @@ def handle_text_change(user_prompt):
     user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
     if not user_prompt:  # Ignore empty or whitespace-only inputs
         substance_painter.layerstack.set_selected_nodes([])
+        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         print("[Python] Empty prompt. Waiting for user input.")
         return
     
