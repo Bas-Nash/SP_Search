@@ -36,9 +36,10 @@ def start_plugin():
 def handle_text_change(user_prompt):
     user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
     if not user_prompt:  # Ignore empty or whitespace-only inputs
+        substance_painter.layerstack.set_selected_nodes([])
         print("[Python] Empty prompt. Waiting for user input.")
         return
-
+    
     stack = substance_painter.textureset.get_active_stack()
 
     if not stack:
@@ -64,12 +65,12 @@ def handle_text_change(user_prompt):
         for layer in all_found:
             print(f"Selected and marked layer named '{user_prompt}': {layer.get_name()}")
     else:
-        # Update the UI to display zero counts if no layers are found
+        substance_painter.layerstack.set_selected_nodes([])
         count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         print(f"Layer named '{user_prompt}' not found.")
 
         # Deselect any currently selected layers
-        substance_painter.layerstack.set_selected_nodes([])
+        
 
 # Define the function to close the plugin UI
 
