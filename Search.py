@@ -14,6 +14,8 @@ plugin_widgets = []
 prompt_input = None
 replace_input = None
 count_display = None
+current_index = -1
+matched_layers = []
 
 # Function to search layers by prefix
 def find_layer(layer, prefix):
@@ -26,6 +28,66 @@ def find_layer(layer, prefix):
         for sub_layer in layer.sub_layers():
             found_layers.extend(find_layer(sub_layer, prefix))
     return found_layers
+
+# Function to navigate layers
+def navigate_layers(direction):
+    global current_index, matched_layers
+
+    if not matched_layers:
+        print("[Python] No layers to navigate.")
+        return
+
+    current_index += direction
+
+    # Wrap around if we go out of bounds
+    if current_index < 0:
+        current_index = len(matched_layers) - 1
+    elif current_index >= len(matched_layers):
+        current_index = 0
+
+    # Select the current layer
+    current_layer = matched_layers[current_index]
+    substance_painter.layerstack.set_selected_nodes([current_layer])
+    print(f"[Python] Navigated to layer: {current_layer.get_name()}")
+
+# Function to handle layer matching and selection
+def handle_text_change(user_prompt):
+    global matched_layers, current_index
+
+    user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
+    if not user_prompt:  # Ignore empty or whitespace-only inputs
+        substance_painter.layerstack.set_selected_nodes([])
+        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
+        matched_layers = []
+        current_index = -1
+        print("[Python] Empty prompt. Waiting for user input.")
+        return
+
+    stack = substance_painter.textureset.get_active_stack()
+    if not stack:
+        print("No active texture set stack found.")
+        return
+
+    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
+    matched_layers = []
+
+    for layer in all_layers:
+        matched_layers.extend(find_layer(layer, user_prompt))
+
+    if matched_layers:
+        fill_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.FillLayer)
+        paint_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.PaintLayer)
+        folder_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer)
+
+        count_display.setText(f"Fill Layers: {fill_count}, Paint Layers: {paint_count}, Group Folders: {folder_count}")
+        substance_painter.layerstack.set_selected_nodes(matched_layers)  # Select all matched layers initially
+        print(f"[Python] Selected all matching layers. Total: {len(matched_layers)}")
+    else:
+        substance_painter.layerstack.set_selected_nodes([])
+        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
+        matched_layers = []
+        current_index = -1
+        print(f"Layer named '{user_prompt}' not found.")
 
 # Function to replace layer names
 def replace_name():
@@ -67,40 +129,6 @@ def start_plugin():
         create_ui()
     else:
         print("[Python] UI is already created.")
-
-# Function to handle text changes in the "Find" field
-def handle_text_change(user_prompt):
-    user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
-    if not user_prompt:  # Ignore empty or whitespace-only inputs
-        substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-        print("[Python] Empty prompt. Waiting for user input.")
-        return
-
-    stack = substance_painter.textureset.get_active_stack()
-    if not stack:
-        print("No active texture set stack found.")
-        return
-
-    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
-    all_found = []
-
-    for layer in all_layers:
-        all_found.extend(find_layer(layer, user_prompt))
-
-    if all_found:
-        fill_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.FillLayer)
-        paint_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.PaintLayer)
-        folder_count = sum(1 for layer in all_found if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer)
-
-        count_display.setText(f"Fill Layers: {fill_count}, Paint Layers: {paint_count}, Group Folders: {folder_count}")
-        substance_painter.layerstack.set_selected_nodes(all_found)
-        for layer in all_found:
-            print(f"Selected and marked layer named '{user_prompt}': {layer.get_name()}")
-    else:
-        substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-        print(f"Layer named '{user_prompt}' not found.")
 
 # Define the function to create the UI
 def create_ui():
@@ -149,8 +177,11 @@ def create_ui():
 
     navigation_layout = QtWidgets.QHBoxLayout()
     prev_button = QtWidgets.QPushButton("<")
+    prev_button.clicked.connect(lambda: navigate_layers(-1))  # Navigate to previous layer
     navigation_layout.addWidget(prev_button)
+
     next_button = QtWidgets.QPushButton(">")
+    next_button.clicked.connect(lambda: navigate_layers(1))  # Navigate to next layer
     navigation_layout.addWidget(next_button)
     main_layout.addLayout(navigation_layout)
 
