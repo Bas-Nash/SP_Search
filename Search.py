@@ -23,8 +23,8 @@ def find_layer(layer, prefix):
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
             found_layers.extend(find_layer(sub_layer, prefix))
-
     return found_layers
+
 
 # Define the plugin's main functionality
 def start_plugin():
@@ -89,12 +89,77 @@ def create_ui():
     # Create a vertical layout for the window
     main_layout = QtWidgets.QVBoxLayout(main_widget)
 
-    # Add a text input field
+    # Create a horizontal layout for the text fields and their labels
+    text_fields_layout = QtWidgets.QHBoxLayout()
+
+    # Create a vertical layout for the "Find" section
+    find_layout = QtWidgets.QVBoxLayout()
+    find_label = QtWidgets.QLabel("Find")
+    find_label.setAlignment(QtCore.Qt.AlignLeft)  # Align the label to the left
+    find_layout.addWidget(find_label)
+
+    # Add the prompt input field
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
     prompt_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
     prompt_input.textChanged.connect(handle_text_change)
-    main_layout.addWidget(prompt_input)
+    find_layout.addWidget(prompt_input)
+
+    # Add the "Find" section to the horizontal layout
+    text_fields_layout.addLayout(find_layout)
+
+    # Add a vertical line divider
+    divider = QtWidgets.QFrame()
+    divider.setFrameShape(QtWidgets.QFrame.VLine)
+    divider.setFrameShadow(QtWidgets.QFrame.Sunken)
+    text_fields_layout.addWidget(divider)
+
+    # Create a vertical layout for the "Replace" section
+    replace_layout = QtWidgets.QVBoxLayout()
+    replace_label = QtWidgets.QLabel("Replace")
+    replace_label.setAlignment(QtCore.Qt.AlignLeft)  # Align the label to the left
+    replace_layout.addWidget(replace_label)
+
+    # Add the replacement input field
+    replace_input = QtWidgets.QLineEdit()
+    replace_input.setPlaceholderText("Enter replacement text...")
+    replace_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+    replace_layout.addWidget(replace_input)
+
+    # Add the "Replace" section to the horizontal layout
+    text_fields_layout.addLayout(replace_layout)
+
+    # Add the text fields layout to the main layout
+    main_layout.addLayout(text_fields_layout)
+
+    # Create a horizontal layout for the navigation buttons ("<" and ">")
+    navigation_layout = QtWidgets.QHBoxLayout()
+
+    # Add "<" button
+    prev_button = QtWidgets.QPushButton("<")
+    navigation_layout.addWidget(prev_button)
+
+    # Add ">" button
+    next_button = QtWidgets.QPushButton(">")
+    navigation_layout.addWidget(next_button)
+
+    # Add the navigation layout to the main layout
+    main_layout.addLayout(navigation_layout)
+
+    # Create a horizontal layout for the replace buttons ("Replace" and "Replace All")
+    replace_buttons_layout = QtWidgets.QHBoxLayout()
+
+    # Add "Replace" button
+    replace_button = QtWidgets.QPushButton("Replace")
+    replace_buttons_layout.addWidget(replace_button)
+
+    # Add "Replace All" button
+    replace_all_button = QtWidgets.QPushButton("Replace All")
+    replace_buttons_layout.addWidget(replace_all_button)
+
+    # Add the replace buttons layout to the main layout
+    main_layout.addLayout(replace_buttons_layout)
+
 
     # Create a toggle button to show/hide counts
     toggle_button = QtWidgets.QPushButton("Hide Stats")
@@ -126,13 +191,15 @@ def create_ui():
 
 def toggle_counts_visibility(button):
     """Toggle the visibility of count display."""
-    count_display = button.parent().findChild(QtWidgets.QLabel)
+    # Toggle the visibility of the `count_display` only
+    global count_display  # Access the global count_display widget
     if count_display.isVisible():
         count_display.setVisible(False)
         button.setText("Show Stats")
     else:
         count_display.setVisible(True)
         button.setText("Hide Stats")
+
           
 def close_plugin():
     for widget in plugin_widgets:
