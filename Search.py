@@ -14,6 +14,8 @@ plugin_widgets = []
 prompt_input = None
 replace_input = None
 count_display = None
+replace_button = None
+replace_all_button = None
 current_index = -1
 matched_layers = []
 
@@ -49,6 +51,7 @@ def navigate_layers(direction):
     current_layer = matched_layers[current_index]
     substance_painter.layerstack.set_selected_nodes([current_layer])
     print(f"[Python] Navigated to layer: {current_layer.get_name()}")
+    update_button_states()
 
 # Function to handle layer matching and selection
 def handle_text_change(user_prompt):
@@ -60,6 +63,7 @@ def handle_text_change(user_prompt):
         count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         matched_layers = []
         current_index = -1
+        update_button_states()
         print("[Python] Empty prompt. Waiting for user input.")
         return
 
@@ -87,9 +91,27 @@ def handle_text_change(user_prompt):
         count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         matched_layers = []
         current_index = -1
-        print(f"Layer named '{user_prompt}' not found.")
 
-# Function to replace layer names
+    update_button_states()
+
+# Function to replace the name of the currently selected layer
+def replace_current_layer():
+    global current_index, matched_layers
+
+    if not replace_input or current_index == -1 or not matched_layers:
+        print("[Python] No active layer selected or replace field not initialized.")
+        return
+
+    replacement_text = replace_input.text().strip()
+    if not replacement_text:
+        print("[Python] Replacement field must be filled.")
+        return
+
+    current_layer = matched_layers[current_index]
+    current_layer.set_name(replacement_text)
+    print(f"[Python] Replaced current layer name with '{replacement_text}'.")
+
+# Function to replace all matched layer names
 def replace_name():
     if not prompt_input or not replace_input:
         print("[Python] Text inputs are not initialized.")
@@ -115,13 +137,33 @@ def replace_name():
 
     if all_found:
         for layer in all_found:
-            new_name = replacement_text
-            print(f"Replacing '{layer.get_name()}' with '{new_name}'.")
-            layer.set_name(new_name)
+            print(f"Replacing '{layer.get_name()}' with '{replacement_text}'.")
+            layer.set_name(replacement_text)
 
         print(f"[Python] Replaced {len(all_found)} layer(s) with the new name '{replacement_text}'.")
     else:
         print(f"[Python] No layers found with the name starting with '{user_prompt}'.")
+
+# Function to update the state of the Replace and Replace All buttons
+def update_button_states():
+    global matched_layers, replace_button, replace_all_button
+
+    stack = substance_painter.textureset.get_active_stack()  # Get the active stack
+    if not stack:
+        print("[Python] No active texture set stack found.")
+        return
+
+    selected_nodes = substance_painter.layerstack.get_selected_nodes(stack)  # Pass the stack to get_selected_nodes()
+
+    if len(selected_nodes) == 1:
+        replace_button.setEnabled(True)
+        replace_all_button.setEnabled(False)
+    elif len(selected_nodes) > 1:
+        replace_button.setEnabled(False)
+        replace_all_button.setEnabled(True)
+    else:
+        replace_button.setEnabled(False)
+        replace_all_button.setEnabled(False)
 
 # Define the plugin's main functionality
 def start_plugin():
@@ -130,9 +172,8 @@ def start_plugin():
     else:
         print("[Python] UI is already created.")
 
-# Define the function to create the UI
 def create_ui():
-    global prompt_input, replace_input, count_display  # Access the global variables
+    global prompt_input, replace_input, count_display, replace_button, replace_all_button  # Access the global variables
 
     if prompt_input is not None:
         print("[Python] UI is already created.")
@@ -187,6 +228,7 @@ def create_ui():
 
     replace_buttons_layout = QtWidgets.QHBoxLayout()
     replace_button = QtWidgets.QPushButton("Replace")
+    replace_button.clicked.connect(replace_current_layer)  # Replace current layer name
     replace_buttons_layout.addWidget(replace_button)
 
     replace_all_button = QtWidgets.QPushButton("Replace All")
@@ -210,6 +252,7 @@ def create_ui():
     substance_painter.ui.add_dock_widget(main_widget)
     plugin_widgets.append(main_widget)
 
+    update_button_states()  # Ensure buttons are correctly initialized
     print("[Python] UI created successfully.")
 
 def toggle_counts_visibility(button):
