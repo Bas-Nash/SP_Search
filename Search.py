@@ -183,6 +183,25 @@ def create_ui():
     main_widget.setWindowTitle("Name Search")
     main_layout = QtWidgets.QVBoxLayout(main_widget)
 
+    # Top buttons layout
+    top_buttons_layout = QtWidgets.QHBoxLayout()
+
+    layers_button = QtWidgets.QPushButton("Layers")
+    layers_button.setCheckable(True)
+    layers_button.setChecked(True)  # Default to Layers view
+    layers_button.setEnabled(False)  # Grey out the Layers button by default
+    layers_button.clicked.connect(lambda: switch_view("layers", layers_button, effects_button))
+    top_buttons_layout.addWidget(layers_button)
+
+    effects_button = QtWidgets.QPushButton("Effects")
+    effects_button.setCheckable(True)
+    effects_button.setChecked(False)
+    effects_button.clicked.connect(lambda: switch_view("effects", layers_button, effects_button))
+    top_buttons_layout.addWidget(effects_button)
+
+    main_layout.addLayout(top_buttons_layout)
+
+    # Main UI layout for Layers functionality
     text_fields_layout = QtWidgets.QHBoxLayout()
 
     find_layout = QtWidgets.QVBoxLayout()
@@ -254,6 +273,22 @@ def create_ui():
 
     update_button_states()  # Ensure buttons are correctly initialized
     print("[Python] UI created successfully.")
+
+def switch_view(view, layers_button, effects_button):
+    if view == "layers":
+        layers_button.setChecked(True)
+        layers_button.setEnabled(False)  # Grey out the Layers button
+        effects_button.setChecked(False)
+        effects_button.setEnabled(True)  # Enable the Effects button
+        print("[Python] Switched to Layers view.")
+        # Implement functionality for showing Layers-related UI elements
+    elif view == "effects":
+        layers_button.setChecked(False)
+        layers_button.setEnabled(True)  # Enable the Layers button
+        effects_button.setChecked(True)
+        effects_button.setEnabled(False)  # Grey out the Effects button
+        print("[Python] Switched to Effects view.")
+        # Implement functionality for showing Effects-related UI elements
 
 def toggle_counts_visibility(button):
     global count_display
