@@ -14,6 +14,7 @@ plugin_widgets = []
 prompt_input = None
 current_index = -1
 matched_layers = []
+status_display = None
 
 # Function to search layers by prefix
 def find_layer(layer, prefix):
@@ -46,6 +47,7 @@ def navigate_layers(direction):
     # Select the current layer
     current_layer = matched_layers[current_index]
     substance_painter.layerstack.set_selected_nodes([current_layer])
+    update_status_display()
     print(f"[Python] Navigated to layer: {current_layer.get_name()}")
 
 # Function to handle layer matching and selection
@@ -57,6 +59,7 @@ def handle_text_change(user_prompt):
         substance_painter.layerstack.set_selected_nodes([])
         matched_layers = []
         current_index = -1
+        update_status_display()
         print("[Python] Empty prompt. Waiting for user input.")
         return
 
@@ -72,12 +75,28 @@ def handle_text_change(user_prompt):
         matched_layers.extend(find_layer(layer, user_prompt))
 
     if matched_layers:
-        substance_painter.layerstack.set_selected_nodes(matched_layers)  # Select all matched layers initially
-        print(f"[Python] Selected all matching layers. Total: {len(matched_layers)}")
+        current_index = 0  # Reset to the first match
+        current_layer = matched_layers[current_index]
+        substance_painter.layerstack.set_selected_nodes([current_layer])
+        print(f"[Python] Selected first matching layer: {current_layer.get_name()}")
     else:
         substance_painter.layerstack.set_selected_nodes([])
         matched_layers = []
         current_index = -1
+
+    update_status_display()
+
+# Function to update the status display
+def update_status_display():
+    global status_display, current_index, matched_layers
+
+    if status_display is None:
+        return
+
+    if matched_layers:
+        status_display.setText(f"{current_index + 1} out of {len(matched_layers)}")
+    else:
+        status_display.setText("0 out of 0")
 
 # Define the plugin's main functionality
 def start_plugin():
@@ -87,7 +106,7 @@ def start_plugin():
         print("[Python] UI is already created.")
 
 def create_ui():
-    global prompt_input  # Access the global variables
+    global prompt_input, status_display  # Access the global variables
 
     if prompt_input is not None:
         print("[Python] UI is already created.")
@@ -111,10 +130,12 @@ def create_ui():
     effects_button.setChecked(False)
     effects_button.clicked.connect(lambda: switch_view("effects", layers_button, effects_button))
     top_buttons_layout.addWidget(effects_button)
+
     main_layout.addLayout(top_buttons_layout)
-    
+
     text_fields_layout = QtWidgets.QHBoxLayout()
     find_layout = QtWidgets.QVBoxLayout()
+
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
     prompt_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
@@ -123,14 +144,21 @@ def create_ui():
 
     text_fields_layout.addLayout(find_layout)
     main_layout.addLayout(text_fields_layout)
+
     navigation_layout = QtWidgets.QHBoxLayout()
     prev_button = QtWidgets.QPushButton("<")
     prev_button.clicked.connect(lambda: navigate_layers(-1))  # Navigate to previous layer
     navigation_layout.addWidget(prev_button)
+
     next_button = QtWidgets.QPushButton(">")
     next_button.clicked.connect(lambda: navigate_layers(1))  # Navigate to next layer
     navigation_layout.addWidget(next_button)
     main_layout.addLayout(navigation_layout)
+
+    status_display = QtWidgets.QLabel("0 out of 0")
+    status_display.setAlignment(QtCore.Qt.AlignCenter)
+    main_layout.addWidget(status_display)
+
     main_layout.addStretch()
 
     substance_painter.ui.add_dock_widget(main_widget)
