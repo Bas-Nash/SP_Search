@@ -12,7 +12,6 @@ plugin_widgets = []
 
 # Variables to store text input widgets
 prompt_input = None
-count_display = None
 current_index = -1
 matched_layers = []
 
@@ -56,7 +55,6 @@ def handle_text_change(user_prompt):
     user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
     if not user_prompt:  # Ignore empty or whitespace-only inputs
         substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         matched_layers = []
         current_index = -1
         print("[Python] Empty prompt. Waiting for user input.")
@@ -74,16 +72,10 @@ def handle_text_change(user_prompt):
         matched_layers.extend(find_layer(layer, user_prompt))
 
     if matched_layers:
-        fill_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.FillLayer)
-        paint_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.PaintLayer)
-        folder_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer)
-
-        count_display.setText(f"Fill Layers: {fill_count}, Paint Layers: {paint_count}, Group Folders: {folder_count}")
         substance_painter.layerstack.set_selected_nodes(matched_layers)  # Select all matched layers initially
         print(f"[Python] Selected all matching layers. Total: {len(matched_layers)}")
     else:
         substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
         matched_layers = []
         current_index = -1
 
@@ -95,18 +87,16 @@ def start_plugin():
         print("[Python] UI is already created.")
 
 def create_ui():
-    global prompt_input, count_display  # Access the global variables
+    global prompt_input  # Access the global variables
 
     if prompt_input is not None:
         print("[Python] UI is already created.")
         return
 
-    # Main UI layout for Layers functionality
-
     main_widget = QtWidgets.QWidget()
     main_widget.setWindowTitle("Name Search")
     main_layout = QtWidgets.QVBoxLayout(main_widget)
-    
+
     top_buttons_layout = QtWidgets.QHBoxLayout()
 
     layers_button = QtWidgets.QPushButton("Layers")
@@ -121,15 +111,10 @@ def create_ui():
     effects_button.setChecked(False)
     effects_button.clicked.connect(lambda: switch_view("effects", layers_button, effects_button))
     top_buttons_layout.addWidget(effects_button)
-
     main_layout.addLayout(top_buttons_layout)
-
+    
     text_fields_layout = QtWidgets.QHBoxLayout()
     find_layout = QtWidgets.QVBoxLayout()
-    find_label = QtWidgets.QLabel("Find")
-    find_label.setAlignment(QtCore.Qt.AlignLeft)
-    find_layout.addWidget(find_label)
-
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
     prompt_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
@@ -138,27 +123,14 @@ def create_ui():
 
     text_fields_layout.addLayout(find_layout)
     main_layout.addLayout(text_fields_layout)
-
     navigation_layout = QtWidgets.QHBoxLayout()
     prev_button = QtWidgets.QPushButton("<")
     prev_button.clicked.connect(lambda: navigate_layers(-1))  # Navigate to previous layer
     navigation_layout.addWidget(prev_button)
-
     next_button = QtWidgets.QPushButton(">")
     next_button.clicked.connect(lambda: navigate_layers(1))  # Navigate to next layer
     navigation_layout.addWidget(next_button)
     main_layout.addLayout(navigation_layout)
-
-    toggle_button = QtWidgets.QPushButton("Hide Stats")
-    toggle_button.setCheckable(True)
-    toggle_button.clicked.connect(lambda: toggle_counts_visibility(toggle_button))
-    main_layout.addWidget(toggle_button)
-
-    count_layout = QtWidgets.QVBoxLayout()
-    count_display = QtWidgets.QLabel("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-    count_display.setAlignment(QtCore.Qt.AlignCenter)
-    count_layout.addWidget(count_display)
-    main_layout.addLayout(count_layout)
     main_layout.addStretch()
 
     substance_painter.ui.add_dock_widget(main_widget)
@@ -181,14 +153,6 @@ def switch_view(view, layers_button, effects_button):
         effects_button.setEnabled(False)  # Grey out the Effects button
         print("[Python] Switched to Effects view.")
         # Implement functionality for showing Effects-related UI elements
-def toggle_counts_visibility(button):
-    global count_display
-    if count_display.isVisible():
-        count_display.setVisible(False)
-        button.setText("Show Stats")
-    else:
-        count_display.setVisible(True)
-        button.setText("Hide Stats")
 
 def close_plugin():
     for widget in plugin_widgets:
