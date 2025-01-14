@@ -98,6 +98,39 @@ def update_status_display():
     else:
         status_display.setText("0 out of 0")
 
+# Function to log effects from all layers, including layers in folders
+def log_layer_effects_recursive(layer):
+    effects = layer.content_effects()
+    if effects:
+        print(f"[Python] Layer: {layer.get_name()} has effects:")
+        for effect in effects:
+            print(f"    - {effect.get_name()}")
+    else:
+        print(f"[Python] Layer: {layer.get_name()} has no effects.")
+
+    if layer.has_mask:
+        mask_effects = layer.mask_effects()
+        if mask_effects:
+            print(f"[Python] Layer: {layer.get_name()} has mask effects:")
+            for effect in mask_effects:
+                print(f"    - {effect.get_name()}")
+
+    if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
+        for sub_layer in layer.sub_layers():
+            log_layer_effects_recursive(sub_layer)
+
+def log_layer_effects():
+    stack = substance_painter.textureset.get_active_stack()
+    if not stack:
+        print("[Python] No active texture set stack found.")
+        return
+
+    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
+    print("[Python] Listing effects in all layers:")
+
+    for layer in all_layers:
+        log_layer_effects_recursive(layer)
+
 # Define the plugin's main functionality
 def start_plugin():
     if not plugin_widgets:  # Check if the UI is already created
@@ -180,7 +213,7 @@ def switch_view(view, layers_button, effects_button):
         effects_button.setChecked(True)
         effects_button.setEnabled(False)  # Grey out the Effects button
         print("[Python] Switched to Effects view.")
-        # Implement functionality for showing Effects-related UI elements
+        log_layer_effects()  # Call function to log effects
 
 def close_plugin():
     for widget in plugin_widgets:
