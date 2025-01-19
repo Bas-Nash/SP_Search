@@ -15,22 +15,28 @@ prompt_input = None
 current_index = -1
 matched_items = []
 status_display = None
-current_view = "layers"  # Default view
+current_view = "layers"
 
 # Function to search effects by prefix
 def find_effects(layer, prefix):
     found_effects = []
     effects = layer.content_effects() + (layer.mask_effects() if layer.has_mask() else [])
+
     for effect in effects:
         if effect.get_name().lower().startswith(prefix.lower()):  # Match effect name with prefix
-            found_effects.append(effect)
+            found_effects.append((effect, id(effect)))  # Store effect with its unique ID
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
             found_effects.extend(find_effects(sub_layer, prefix))
     return found_effects
 
-# Function to navigate items (layers or effects)
+# Function to handle input for layer or effect matching
+def select_effect(effect):
+    substance_painter.layerstack.set_selected_nodes([effect])
+    print(f"[Python] Selected effect: {effect.get_name()} with ID: {id(effect)}")
+
+# Function to search effects by prefix
 def navigate_items(direction):
     global current_index, matched_items
 
@@ -47,13 +53,16 @@ def navigate_items(direction):
         current_index = 0
 
     # Select the current item
-    current_item = matched_items[current_index]
-    substance_painter.layerstack.set_selected_nodes([current_item])
+    current_item, _ = matched_items[current_index]
+    if current_view == "effects":
+        select_effect(current_item)
+    else:
+        substance_painter.layerstack.set_selected_nodes([current_item])
     update_status_display()
     if hasattr(current_item, "get_name"):
         print(f"[Python] Navigated to item: {current_item.get_name()}")
 
-# Function to handle input for layer or effect matching
+# Function to update the status display
 def handle_text_change(user_prompt):
     global matched_items, current_index, current_view
 
@@ -76,15 +85,22 @@ def handle_text_change(user_prompt):
 
     if current_view == "layers":
         for layer in all_layers:
-            matched_items.extend(find_layer(layer, user_prompt))
+            matched_items.extend([(layer, id(layer)) for layer in find_layer(layer, user_prompt)])
     elif current_view == "effects":
         for layer in all_layers:
             matched_items.extend(find_effects(layer, user_prompt))
 
     if matched_items:
         current_index = 0  # Reset to the first match
-        current_item = matched_items[current_index]
-        substance_painter.layerstack.set_selected_nodes([current_item])
+        current_item, _ = matched_items[current_index]
+
+        if current_view == "effects":
+            # Select the specific effect
+            select_effect(current_item)
+        else:
+            # Select the entire layer if in layer view
+            substance_painter.layerstack.set_selected_nodes([current_item])
+        
         if hasattr(current_item, "get_name"):
             print(f"[Python] Selected first matching item: {current_item.get_name()}")
     else:
@@ -94,7 +110,7 @@ def handle_text_change(user_prompt):
 
     update_status_display()
 
-# Function to update the status display
+# Function to navigate items (layers or effects)
 def update_status_display():
     global status_display, current_index, matched_items
 
@@ -105,8 +121,6 @@ def update_status_display():
         status_display.setText(f"{current_index + 1} out of {len(matched_items)}")
     else:
         status_display.setText("0 out of 0")
-
-# Define the plugin's main functionality
 def start_plugin():
     if not plugin_widgets:  # Check if the UI is already created
         create_ui()
