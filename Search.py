@@ -17,15 +17,9 @@ current_index = -1
 matched_items = []
 status_display = None
 current_view = "layers"
-manual_selection = False
+manual_selection = False  # Track manual selections
 
 # Function to search effects by prefix
-def manual_select(nodes):
-    global manual_selection
-
-    if nodes:  # Only mark manual selection if nodes are selected
-        manual_selection = True
-        print("[Python] Manual selection made.")
 def find_effects(layer, prefix):
     found_effects = []
     effects = layer.content_effects() + (layer.mask_effects() if layer.has_mask() else [])
@@ -55,6 +49,7 @@ def find_layer(layer, prefix):
 def select_effect(effect):
     substance_painter.layerstack.set_selected_nodes([effect])
     print(f"[Python] Selected effect: {effect.get_name()} with ID: {id(effect)}")
+
 # Function to navigate items (layers or effects)
 def navigate_items(direction):
     global current_index, matched_items
@@ -131,8 +126,6 @@ def handle_text_change(user_prompt):
         current_index = -1
         update_status_display()
 
-# Event to track manual selection
-
 # Function to update the layer and effect lists when the layer stack changes
 def update_layer_stack(event):
     global current_index, matched_items, manual_selection
@@ -183,6 +176,42 @@ def update_layer_stack(event):
             update_status_display()
             print("[Python] No user input, cleared matched items.")
 
+# Modified switch_view to trigger handle_text_change
+def switch_view(view, layers_button, effects_button):
+    global current_view
+    current_view = view
+
+    if view == "layers":
+        layers_button.setChecked(True)
+        layers_button.setEnabled(False)  # Grey out the Layers button
+        effects_button.setChecked(False)
+        effects_button.setEnabled(True)  # Enable the Effects button
+        print("[Python] Switched to Layers view.")
+    elif view == "effects":
+        layers_button.setChecked(False)
+        layers_button.setEnabled(True)  # Enable the Layers button
+        effects_button.setChecked(True)
+        effects_button.setEnabled(False)  # Grey out the Effects button
+        print("[Python] Switched to Effects view.")
+
+    # Trigger handle_text_change to refresh matched items
+    if prompt_input:
+        handle_text_change(prompt_input.text())
+
+# Function to close the plugin
+def close_plugin():
+    for widget in plugin_widgets:
+        substance_painter.ui.delete_ui_element(widget)
+    plugin_widgets.clear()
+
+    # Disconnect the layer stack update event
+    substance_painter.event.DISPATCHER.disconnect(substance_painter.event.LayerStacksModelDataChanged, update_layer_stack)
+
+# Function to initialize the plugin
+def initialize_plugin():
+    print("[Python] Initializing plugin...")
+    create_ui()
+    print("[Python] Plugin initialized.")
 
 # Function to start the plugin
 def start_plugin():
@@ -255,39 +284,6 @@ def create_ui():
     substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, update_layer_stack)
 
     print("[Python] UI created successfully.")
-
-# Function to switch between layers and effects view
-def switch_view(view, layers_button, effects_button):
-    global current_view
-    current_view = view
-
-    if view == "layers":
-        layers_button.setChecked(True)
-        layers_button.setEnabled(False)  # Grey out the Layers button
-        effects_button.setChecked(False)
-        effects_button.setEnabled(True)  # Enable the Effects button
-        print("[Python] Switched to Layers view.")
-    elif view == "effects":
-        layers_button.setChecked(False)
-        layers_button.setEnabled(True)  # Enable the Layers button
-        effects_button.setChecked(True)
-        effects_button.setEnabled(False)  # Grey out the Effects button
-        print("[Python] Switched to Effects view.")
-
-# Function to close the plugin
-def close_plugin():
-    for widget in plugin_widgets:
-        substance_painter.ui.delete_ui_element(widget)
-    plugin_widgets.clear()
-
-    # Disconnect the layer stack update event
-    substance_painter.event.DISPATCHER.disconnect(substance_painter.event.LayerStacksModelDataChanged, update_layer_stack)
-
-# Function to initialize the plugin
-def initialize_plugin():
-    print("[Python] Initializing plugin...")
-    create_ui()
-    print("[Python] Plugin initialized.")
 
 if __name__ == "__main__":
     initialize_plugin()
