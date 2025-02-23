@@ -4,36 +4,38 @@ import substance_painter.project
 import substance_painter.textureset
 import substance_painter.layerstack
 import substance_painter.event
-from PySide2 import QtGui
-from PySide2 import QtWidgets
-from PySide2 import QtCore
+from PySide2 import QtGui, QtWidgets, QtCore
 
-# List to store plugin widgets
 plugin_widgets = []
-
-# Variables to store text input widgets
 prompt_input = None
 current_index = -1
 matched_items = []
 status_display = None
 current_view = "layers"
-manual_selection = True  # Track manual selections
+manual_selection = True
+root_layers = []
 
-# Function to search effects with substring match
+def update_root_layers():
+    global root_layers
+    stack = substance_painter.textureset.get_active_stack()
+    if stack:
+        root_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
+    else:
+        root_layers = []
+
 def find_effects(layer, substring):
     found_effects = []
     effects = layer.content_effects() + (layer.mask_effects() if layer.has_mask() else [])
 
     for effect in effects:
-        if substring.lower() in effect.get_name().lower():  # Match effect name with substring
-            found_effects.append((effect, id(effect)))  # Store effect with its unique ID
+        if substring.lower() in effect.get_name().lower():
+            found_effects.append((effect, id(effect)))
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
             found_effects.extend(find_effects(sub_layer, substring))
     return found_effects
 
-# Function to search layers with substring match
 def find_layer(layer, substring):
     found_layers = []
     if substring.lower() in layer.get_name().lower():
@@ -45,38 +47,44 @@ def find_layer(layer, substring):
 
     return found_layers
 
-# Function to handle input for layer or effect matching
 def select_effect(effect):
     substance_painter.layerstack.set_selected_nodes([effect])
     print(f"[Python] Selected effect: {effect.get_name()} with ID: {id(effect)}")
 
-# Function to navigate items (layers or effects)
 def navigate_items(direction):
     global current_index, matched_items, manual_selection
+
+    print(f"[DEBUG] Navigating: Current Index = {current_index}, Matched Items = {len(matched_items)}")
+
     if not matched_items:
         print("[Python] No items to navigate.")
         return
 
-    manual_selection = True  # Mark that navigation is manual
+    manual_selection = True
     current_index += direction
 
-    # Wrap around if we go out of bounds
+    # Ensure looping behavior
     if current_index < 0:
         current_index = len(matched_items) - 1
     elif current_index >= len(matched_items):
         current_index = 0
 
-    # Select the current item
-    current_item, _ = matched_items[current_index]
+    current_uid, _ = matched_items[current_index]
+
+    # Retrieve the actual node using UID
+    current_item = substance_painter.layerstack.LayerNode(current_uid)
+
+    # Debug print: Verify new current_index and selected item
+    print(f"[DEBUG] New Index: {current_index}, Selected Item: {current_item.get_name()} (UID: {current_uid})")
+
     if current_view == "effects":
         select_effect(current_item)
     else:
         substance_painter.layerstack.set_selected_nodes([current_item])
-    update_status_display()
-    if hasattr(current_item, "get_name"):
-        print(f"[Python] Navigated to item: {current_item.get_name()}")
 
-# Function to update the status display
+    update_status_display()
+
+
 def update_status_display():
     global status_display, current_index, matched_items
 
@@ -88,12 +96,13 @@ def update_status_display():
     else:
         status_display.setText("0 out of 0")
 
-# Updated handle_text_change to reset selection when switching views
 def handle_text_change(user_prompt):
     global matched_items, current_index, current_view, manual_selection
 
-    user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
-    if not user_prompt:  # Ignore empty or whitespace-only inputs
+    update_root_layers()
+
+    user_prompt = user_prompt.strip().lower()
+    if not user_prompt:
         substance_painter.layerstack.set_selected_nodes([])
         matched_items = []
         current_index = -1
@@ -101,29 +110,34 @@ def handle_text_change(user_prompt):
         print("[Python] Empty prompt. Waiting for user input.")
         return
 
-    stack = substance_painter.textureset.get_active_stack()
-    if not stack:
-        print("[Python] No active texture set stack found.")
-        return
+    previous_uid = None
+    if current_index >= 0 and current_index < len(matched_items):
+        previous_uid, _ = matched_items[current_index]  # Store previously selected UID
 
-    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
     matched_items = []
 
-    # Match items based on the current view (layers or effects)
     if current_view == "layers":
-        for layer in all_layers:
-            matched_items.extend([(layer, id(layer)) for layer in find_layer(layer, user_prompt)])
+        for layer in root_layers:
+            found_layers = find_layer(layer, user_prompt)
+            matched_items.extend([(layer.uid(), layer) for layer in found_layers])  # Store UID
     elif current_view == "effects":
-        for layer in all_layers:
-            matched_items.extend(find_effects(layer, user_prompt))
+        for layer in root_layers:
+            found_effects = find_effects(layer, user_prompt)
+            matched_items.extend([(effect.uid(), effect) for effect, _ in found_effects])  # Store UID
+
+    print(f"[DEBUG] Matched Items ({len(matched_items)}): {[ (uid, item.get_name()) for uid, item in matched_items]}")
 
     if matched_items:
-        current_index = 0  # Reset to the first match
-        first_item, _ = matched_items[current_index]
+        # Try to restore the previous selection if it still exists in matched_items
+        new_index = next((i for i, (uid, _) in enumerate(matched_items) if uid == previous_uid), 0)
+        current_index = new_index
+
+        selected_uid, selected_item = matched_items[current_index]
         if current_view == "effects":
-            select_effect(first_item)
+            select_effect(selected_item)
         else:
-            substance_painter.layerstack.set_selected_nodes([first_item])
+            substance_painter.layerstack.set_selected_nodes([selected_item])
+
         update_status_display()
     else:
         substance_painter.layerstack.set_selected_nodes([])
@@ -132,93 +146,29 @@ def handle_text_change(user_prompt):
         update_status_display()
         print("[Python] No matches found for input.")
 
-    # Reset manual selection for future inputs
-    manual_selection = True
-
-        
 def update_layer_stack(event):
-    global current_index, matched_items, manual_selection
-
-    if manual_selection:
-        print("[Python] Manual selection detected. Skipping update.")
-        return
-
+    update_root_layers()
     print("[Python] Layer stack updated. Refreshing matched items.")
-    
-    if prompt_input:
-        user_prompt = prompt_input.text().strip().lower()  # Get current user input
-        if user_prompt:  # Only refresh if there's an active search prompt
-            stack = substance_painter.textureset.get_active_stack()
-            if not stack:
-                print("[Python] No active texture set stack found during update.")
-                return
-
-            all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
-            new_matched_items = []
-
-            # Recalculate matched items based on the current view
-            if current_view == "layers":
-                for layer in all_layers:
-                    new_matched_items.extend([(layer, id(layer)) for layer in find_layer(layer, user_prompt)])
-            elif current_view == "effects":
-                for layer in all_layers:
-                    new_matched_items.extend(find_effects(layer, user_prompt))
-
-            # Update matched items and auto-select the first match
-            matched_items = new_matched_items
-            if matched_items:
-                current_index = 0
-                first_item, _ = matched_items[current_index]
-                if current_view == "effects":
-                    select_effect(first_item)
-                else:
-                    substance_painter.layerstack.set_selected_nodes([first_item])
-            else:
-                matched_items = []
-                current_index = -1
-
-            # Trigger text change handling to update UI and logic
-            handle_text_change(user_prompt)
-        else:
-            matched_items = []
-            current_index = -1
-            substance_painter.layerstack.set_selected_nodes([])
-            update_status_display()
-            print("[Python] No user input, cleared matched items.")
-
-# Modified switch_view to auto-select the first matched item
-def switch_view(view, layers_button, effects_button):
-    global current_view, current_index, matched_items
-
-    current_view = view
-
-    if view == "layers":
-        layers_button.setChecked(True)
-        layers_button.setEnabled(False)  # Grey out the Layers button
-        effects_button.setChecked(False)
-        effects_button.setEnabled(True)  # Enable the Effects button
-        print("[Python] Switched to Layers view.")
-    elif view == "effects":
-        layers_button.setChecked(False)
-        layers_button.setEnabled(True)  # Enable the Layers button
-        effects_button.setChecked(True)
-        effects_button.setEnabled(False)  # Grey out the Effects button
-        print("[Python] Switched to Effects view.")
-
-    # Trigger handle_text_change to refresh matched items and reset selection
     if prompt_input:
         handle_text_change(prompt_input.text())
 
-    # Auto-select the first matched item if available
-    if matched_items:
-        current_index = 0  # Reset to the first item
-        first_item, _ = matched_items[current_index]
-        if view == "effects":
-            select_effect(first_item)
-        else:
-            substance_painter.layerstack.set_selected_nodes([first_item])
-        update_status_display()
-
+def switch_view(view, layers_button, effects_button):
+    global current_view, current_index, matched_items
+    current_view = view
+    if view == "layers":
+        layers_button.setChecked(True)
+        layers_button.setEnabled(False)
+        effects_button.setChecked(True)
+        effects_button.setEnabled(True)
+        print("[Python] Switched to Layers view.")
+    elif view == "effects":
+        layers_button.setChecked(True)
+        layers_button.setEnabled(True)
+        effects_button.setChecked(False)
+        effects_button.setEnabled(False)
+        print("[Python] Switched to Effects view.")
+    if prompt_input:
+        handle_text_change(prompt_input.text())
 
 # Function to close the plugin
 def close_plugin():
