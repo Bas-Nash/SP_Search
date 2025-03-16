@@ -19,11 +19,11 @@ def find_items(layer, substring):
     found_effects = []
     found_layers = []
     if substring.lower() in layer.get_name().lower():
-        found_layers.append((layer.get_name(), uid(layer)))
+        found_layers.append(layer)
     effects = layer.content_effects() + (layer.mask_effects() if layer.has_mask() else [])
     for effect in effects:
         if substring.lower() in effect.get_name().lower():
-            found_effects.append((effect.get_name(), uid(effect)))
+            found_effects.append(effect)
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
             sub_effects, sub_layers = find_items(sub_layer, substring)
@@ -31,15 +31,22 @@ def find_items(layer, substring):
             found_layers.extend(sub_layers)
     return found_effects, found_layers
 
-def display_current_item(status_display):
+def select_current_item(status_display):
     global current_index, found_layers, found_effects, current_view
     
     if current_view == "layers" and found_layers:
-        item_name, item_id = found_layers[current_index]
-        status_display.setText(f"{current_index + 1} out of {len(found_layers)}: {item_name} [UID: {item_id}]")
+        node = found_layers[current_index]
+        substance_painter.layerstack.set_selected_nodes([node])
     elif current_view == "effects" and found_effects:
-        item_name, item_id = found_effects[current_index]
-        status_display.setText(f"{current_index + 1} out of {len(found_effects)}: {item_name} [UID: {item_id}]")
+        node = found_effects[current_index]
+        substance_painter.layerstack.set_selected_nodes([node])
+    update_status_display(status_display)
+
+def update_status_display(status_display):
+    global current_index, found_layers, found_effects, current_view
+    total_items = len(found_layers) if current_view == "layers" else len(found_effects)
+    if total_items > 0 and current_index >= 0:
+        status_display.setText(f"{current_index + 1} out of {total_items}")
     else:
         status_display.setText("0 out of 0")
 
@@ -50,9 +57,9 @@ def navigate(direction, status_display):
         current_index = (current_index + direction) % len(found_layers)
     elif current_view == "effects" and found_effects:
         current_index = (current_index + direction) % len(found_effects)
-    display_current_item(status_display)
+    select_current_item(status_display)
 
-def search_layers(prompt_input, status_display):
+def search_items(prompt_input, status_display):
     global found_layers, found_effects, current_index
     substring = prompt_input.text().strip()
     found_layers.clear()
@@ -68,7 +75,7 @@ def search_layers(prompt_input, status_display):
     
     if found_layers or found_effects:
         current_index = 0
-    display_current_item(status_display)
+    select_current_item(status_display)
 
 def switch_view(view, layers_button, effects_button, status_display):
     global current_view, current_index
@@ -80,7 +87,7 @@ def switch_view(view, layers_button, effects_button, status_display):
     effects_button.setChecked(view == "effects")
     effects_button.setEnabled(view != "effects")
     
-    display_current_item(status_display)
+    select_current_item(status_display)
 
 def create_ui():
     global plugin_widgets
@@ -102,7 +109,7 @@ def create_ui():
     search_button = QtWidgets.QPushButton("Search")
     status_display = QtWidgets.QLabel("0 out of 0")
     status_display.setAlignment(QtCore.Qt.AlignCenter)
-    search_button.clicked.connect(lambda: search_layers(prompt_input, status_display))
+    search_button.clicked.connect(lambda: search_items(prompt_input, status_display))
     find_layout.addWidget(search_button)
     text_fields_layout.addLayout(find_layout)
     main_layout.addLayout(text_fields_layout)
@@ -142,7 +149,7 @@ def create_ui():
 def initialize_plugin():
     print("[Python] Initializing plugin...")
     create_ui()
-    substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, lambda: search_layers(None, None))
+    substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, lambda: search_items(None, None))
     print("[Python] Plugin initialized.")
 
 def close_plugin():
