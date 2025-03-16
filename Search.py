@@ -88,6 +88,9 @@ def switch_view(view, layers_button, effects_button, status_display):
     effects_button.setEnabled(view != "effects")
     
     select_current_item(status_display)
+    
+def update_layer_stack(event):
+    print("Updating Find functionality")
 
 def create_ui():
     global plugin_widgets
@@ -143,6 +146,8 @@ def create_ui():
 
     substance_painter.ui.add_dock_widget(main_widget)
     plugin_widgets.append(main_widget)
+    
+    substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, update_layer_stack)
     
     print("[Python] UI created successfully.")
 
