@@ -63,11 +63,11 @@ def update_search_results(substring, status_display):
         new_found_layers.extend(layers)
         new_found_effects.extend(effects)
     
-    if new_found_layers != found_layers or new_found_effects != found_effects:
+    if new_found_layers or new_found_effects:
         found_layers[:] = new_found_layers
         found_effects[:] = new_found_effects
-        if found_layers or found_effects:
-            current_index = 0
+        current_index = 0
+        select_current_item(status_display, should_select=True)
         update_status_display(status_display)
 
 def select_current_item(status_display, should_select=True):
@@ -110,62 +110,6 @@ def on_layer_stack_changed(*args):
         if prompt_input and status_display:
             update_search_results(prompt_input.text().strip(), status_display)
             select_current_item(status_display, should_select=False)
-          
-def create_ui():
-    global plugin_widgets
-    
-    if plugin_widgets:
-        print("[Python] UI is already created.")
-        return
-    
-    main_widget = QtWidgets.QWidget()
-    main_widget.setWindowTitle("Search")
-    main_layout = QtWidgets.QVBoxLayout(main_widget)
-    
-    text_fields_layout = QtWidgets.QHBoxLayout()
-    find_layout = QtWidgets.QVBoxLayout()
-    prompt_input = QtWidgets.QLineEdit()
-    prompt_input.setPlaceholderText("Type your prompt here...")
-    find_layout.addWidget(prompt_input)
-    
-    status_display = QtWidgets.QLabel("0 out of 0")
-    status_display.setAlignment(QtCore.Qt.AlignCenter)
-    prompt_input.textChanged.connect(lambda: search_items(prompt_input, status_display))
-    find_layout.addWidget(status_display)
-    text_fields_layout.addLayout(find_layout)
-    main_layout.addLayout(text_fields_layout)
-
-    top_buttons_layout = QtWidgets.QHBoxLayout()
-    layers_button = QtWidgets.QPushButton("Layers")
-    layers_button.setCheckable(True)
-    layers_button.setChecked(True)
-    layers_button.setEnabled(False)
-    layers_button.clicked.connect(lambda: switch_view("layers", layers_button, effects_button, status_display))
-    top_buttons_layout.addWidget(layers_button)
-    
-    effects_button = QtWidgets.QPushButton("Effects")
-    effects_button.setCheckable(True)
-    effects_button.setChecked(False)
-    effects_button.clicked.connect(lambda: switch_view("effects", layers_button, effects_button, status_display))
-    top_buttons_layout.addWidget(effects_button)
-    main_layout.addLayout(top_buttons_layout)
-
-    navigation_layout = QtWidgets.QHBoxLayout()
-    prev_button = QtWidgets.QPushButton("<")
-    prev_button.clicked.connect(lambda: navigate(-1, status_display))
-    navigation_layout.addWidget(prev_button)
-    next_button = QtWidgets.QPushButton(">")
-    next_button.clicked.connect(lambda: navigate(1, status_display))
-    navigation_layout.addWidget(next_button)
-    main_layout.addLayout(navigation_layout)
-
-    main_layout.addWidget(status_display)
-    main_layout.addStretch()
-    
-    substance_painter.ui.add_dock_widget(main_widget)
-    plugin_widgets.append(main_widget)
-    
-    print("[Python] UI created successfully.")
     
 def start_plugin():
     create_ui()
