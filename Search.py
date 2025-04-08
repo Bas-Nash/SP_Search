@@ -12,6 +12,7 @@ found_layers = []
 found_content_effects = []
 found_mask_effects = []
 current_index = -1
+replace_input = None
 
 def uid(node):
     return node.uid() if hasattr(node, 'uid') else id(node)
@@ -143,6 +144,61 @@ def search_items(prompt_input, status_display):
     update_search_results(prompt_input.text().strip(), status_display)
     select_current_item(status_display, should_select=True)
 
+def replace_current_item():
+    global current_index, current_view, found_layers, found_content_effects, found_mask_effects, replace_input
+
+    if replace_input is None or current_index == -1:
+        print("[Python] No active selection or replace field not initialized.")
+        return
+    
+    replacement_text = replace_input.text().strip()
+    if not replacement_text:
+        print("[Python] Replacement field must be filled.")
+        return
+
+    if current_view == "layers" and found_layers:
+        current_item = found_layers[current_index]
+    elif current_view == "content_effects" and found_content_effects:
+        current_item = found_content_effects[current_index]
+    elif current_view == "mask_effects" and found_mask_effects:
+        current_item = found_mask_effects[current_index]
+    else:
+        print("[Python] No valid selection to replace.")
+        return
+
+    current_item.set_name(replacement_text)
+    print(f"[Python] Replaced current {current_view[:-1]} name with '{replacement_text}'.")
+def replace_all_items():
+    global current_view, found_layers, found_content_effects, found_mask_effects, replace_input
+
+    if replace_input is None:
+        print("[Python] Replace field not initialized.")
+        return
+
+    replacement_text = replace_input.text().strip()
+    if not replacement_text:
+        print("[Python] Replacement field must be filled.")
+        return
+
+    # Copy the list to iterate on a snapshot of the items.
+    if current_view == "layers" and found_layers:
+        items_to_replace = found_layers[:]  # Create a shallow copy
+        for item in items_to_replace:
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all layer names with '{replacement_text}'.")
+    elif current_view == "content_effects" and found_content_effects:
+        items_to_replace = found_content_effects[:]
+        for item in items_to_replace:
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all content effect names with '{replacement_text}'.")
+    elif current_view == "mask_effects" and found_mask_effects:
+        items_to_replace = found_mask_effects[:]
+        for item in items_to_replace:
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all mask effect names with '{replacement_text}'.")
+    else:
+        print("[Python] No valid items to replace.")
+        
 def on_layer_stack_changed(*args):
     if not substance_painter.project.is_open():
         return
@@ -187,7 +243,7 @@ def create_collapsible_section(title, content_widget):
 
     return container, collapsible_layout
 def create_ui():
-    global plugin_widgets
+    global plugin_widgets, replace_input
 
     if plugin_widgets:
         print("[Python] UI is already created.")
@@ -253,7 +309,9 @@ def create_ui():
 
     replace_buttons_layout = QtWidgets.QHBoxLayout()
     replace_button = QtWidgets.QPushButton("Replace")
+    replace_button.clicked.connect(replace_current_item)
     replace_all_button = QtWidgets.QPushButton("Replace All")
+    replace_all_button.clicked.connect(replace_all_items)
     replace_buttons_layout.addWidget(replace_button)
     replace_buttons_layout.addWidget(replace_all_button)
     replace_layout.addLayout(replace_buttons_layout)
