@@ -3,103 +3,176 @@ import substance_painter.ui
 import substance_painter.project
 import substance_painter.textureset
 import substance_painter.layerstack
-from PySide2 import QtGui
-from PySide2 import QtWidgets
-from PySide2 import QtCore
+import substance_painter.event
+from PySide2 import QtGui, QtWidgets, QtCore
 
-# List to store plugin widgets
 plugin_widgets = []
-
-# Variables to store text input widgets
-prompt_input = None
-replace_input = None
-count_display = None
-replace_button = None
-replace_all_button = None
+current_view = "layers"
+found_layers = []
+found_content_effects = []
+found_mask_effects = []
 current_index = -1
-matched_layers = []
+replace_input = None
 
-# Function to search layers by prefix
-def find_layer(layer, prefix):
-    found_layers = []
-    layer_name = layer.get_name().lower()  # Convert to lowercase
-    if layer_name.startswith(prefix.lower()):  # Check if the name starts with the prefix
-        found_layers.append(layer)
+def uid(node):
+    return node.uid() if hasattr(node, 'uid') else id(node)
+
+def find_items(layer, substring):
+    # Cache the lower-case version of the substring
+    substring_lower = substring.lower()
+    found_content_effects = []
+    found_mask_effects = []
+    found_layers_local = []  # Renamed variable to avoid conflict with the global list
+
+    if substring_lower in layer.get_name().lower():
+        found_layers_local.append(layer)
+
+    for effect in layer.content_effects():
+        if substring_lower in effect.get_name().lower():
+            found_content_effects.append(effect)
+
+    if layer.has_mask():
+        for effect in layer.mask_effects():
+            if substring_lower in effect.get_name().lower():
+                found_mask_effects.append(effect)
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
-            found_layers.extend(find_layer(sub_layer, prefix))
-    return found_layers
+            sub_content, sub_mask, sub_layers = find_items(sub_layer, substring)
+            found_content_effects.extend(sub_content)
+            found_mask_effects.extend(sub_mask)
+            found_layers_local.extend(sub_layers)
 
-# Function to navigate layers
-def navigate_layers(direction):
-    global current_index, matched_layers
+    return found_content_effects, found_mask_effects, found_layers_local
 
-    if not matched_layers:
-        print("[Python] No layers to navigate.")
-        return
+def get_current_items():
+    mapping = {
+        "layers": found_layers,
+        "content_effects": found_content_effects,
+        "mask_effects": found_mask_effects,
+    }
+    return mapping.get(current_view, [])
 
-    current_index += direction
+def require_project_open(func):
+    def wrapper(*args, **kwargs):
+        if not substance_painter.project.is_open():
+            return
+        return func(*args, **kwargs)
+    return wrapper
 
-    # Wrap around if we go out of bounds
-    if current_index < 0:
-        current_index = len(matched_layers) - 1
-    elif current_index >= len(matched_layers):
-        current_index = 0
+def switch_view(view, layers_button, content_button, mask_button, status_display):
+    global current_view, current_index
+    current_view = view
+    items = get_current_items()
+    current_index = 0 if items else -1
 
-    # Select the current layer
-    current_layer = matched_layers[current_index]
-    substance_painter.layerstack.set_selected_nodes([current_layer])
-    print(f"[Python] Navigated to layer: {current_layer.get_name()}")
-    update_button_states()
+    # Nested helper to toggle button states
+    def toggle(button, active):
+        button.setChecked(active)
+        button.setEnabled(not active)
 
-# Function to handle layer matching and selection
-def handle_text_change(user_prompt):
-    global matched_layers, current_index
+    toggle(layers_button, view == "layers")
+    toggle(content_button, view == "content_effects")
+    toggle(mask_button, view == "mask_effects")
 
-    user_prompt = user_prompt.strip().lower()  # Convert input to lowercase
-    if not user_prompt:  # Ignore empty or whitespace-only inputs
+    select_current_item(status_display)
+
+@require_project_open
+def update_search_results(substring, status_display):
+    global found_layers, found_content_effects, found_mask_effects, current_index, current_view
+
+    # If search string is empty, clear all results.
+    if not substring.strip():
+        found_layers.clear()
+        found_content_effects.clear()
+        found_mask_effects.clear()
         substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-        matched_layers = []
-        current_index = -1
-        update_button_states()
-        print("[Python] Empty prompt. Waiting for user input.")
+        update_status_display(status_display)
         return
+
+    old_lengths = (len(found_layers), len(found_content_effects), len(found_mask_effects))
+
+    new_layers = []
+    new_content_effects = []
+    new_mask_effects = []
 
     stack = substance_painter.textureset.get_active_stack()
-    if not stack:
-        print("No active texture set stack found.")
+    root_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
+
+    for layer in root_layers:
+        content, mask, layers_found = find_items(layer, substring)
+        new_content_effects.extend(content)
+        new_mask_effects.extend(mask)
+        new_layers.extend(layers_found)
+
+    found_layers[:] = new_layers
+    found_content_effects[:] = new_content_effects
+    found_mask_effects[:] = new_mask_effects
+
+    new_lengths = (len(found_layers), len(found_content_effects), len(found_mask_effects))
+    items = get_current_items()
+
+    if new_lengths != old_lengths:
+        current_index = 0 if items else -1
+        select_current_item(status_display, should_select=True)
+    else:
+        if current_index >= len(items):
+            current_index = len(items) - 1 if items else -1
+        update_status_display(status_display)
+
+@require_project_open
+def select_current_item(status_display, should_select=True):
+    global current_index
+    items = get_current_items()
+    selection = [items[current_index]] if items and current_index >= 0 else []
+    
+    if should_select:
+        substance_painter.layerstack.set_selected_nodes(selection)
+    
+    update_status_display(status_display)
+
+def update_status_display(status_display):
+    items = get_current_items()
+    total_items = len(items)
+    if total_items > 0 and current_index >= 0:
+        status_display.setText(f"{current_index + 1} out of {total_items}")
+    else:
+        status_display.setText("0 out of 0")
+
+@require_project_open
+def navigate(direction, status_display):
+    global current_index
+    items = get_current_items()
+    if items:
+        current_index = (current_index + direction) % len(items)
+    select_current_item(status_display, should_select=True)
+
+def search_items(prompt_input, status_display):
+    update_search_results(prompt_input.text().strip(), status_display)
+    select_current_item(status_display, should_select=True)
+
+def replace_current_item():
+    global current_index, replace_input
+    if replace_input is None or current_index == -1:
+        print("[Python] No active selection or replace field not initialized.")
+        return
+    
+    replacement_text = replace_input.text().strip()
+    if not replacement_text:
+        print("[Python] Replacement field must be filled.")
         return
 
-    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
-    matched_layers = []
-
-    for layer in all_layers:
-        matched_layers.extend(find_layer(layer, user_prompt))
-
-    if matched_layers:
-        fill_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.FillLayer)
-        paint_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.PaintLayer)
-        folder_count = sum(1 for layer in matched_layers if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer)
-
-        count_display.setText(f"Fill Layers: {fill_count}, Paint Layers: {paint_count}, Group Folders: {folder_count}")
-        substance_painter.layerstack.set_selected_nodes(matched_layers)  # Select all matched layers initially
-        print(f"[Python] Selected all matching layers. Total: {len(matched_layers)}")
+    items = get_current_items()
+    if items:
+        current_item = items[current_index]
+        current_item.set_name(replacement_text)
     else:
-        substance_painter.layerstack.set_selected_nodes([])
-        count_display.setText("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-        matched_layers = []
-        current_index = -1
+        print("[Python] No valid selection to replace.")
 
-    update_button_states()
-
-# Function to replace the name of the currently selected layer
-def replace_current_layer():
-    global current_index, matched_layers
-
-    if not replace_input or current_index == -1 or not matched_layers:
-        print("[Python] No active layer selected or replace field not initialized.")
+def replace_all_items():
+    global replace_input
+    if replace_input is None:
+        print("[Python] Replace field not initialized.")
         return
 
     replacement_text = replace_input.text().strip()
@@ -107,207 +180,164 @@ def replace_current_layer():
         print("[Python] Replacement field must be filled.")
         return
 
-    current_layer = matched_layers[current_index]
-    current_layer.set_name(replacement_text)
-    print(f"[Python] Replaced current layer name with '{replacement_text}'.")
-
-# Function to replace all matched layer names
-def replace_name():
-    if not prompt_input or not replace_input:
-        print("[Python] Text inputs are not initialized.")
-        return
-
-    user_prompt = prompt_input.text().strip().lower()
-    replacement_text = replace_input.text().strip()
-
-    if not user_prompt or not replacement_text:
-        print("[Python] Both find and replace fields must be filled.")
-        return
-
-    stack = substance_painter.textureset.get_active_stack()
-    if not stack:
-        print("No active texture set stack found.")
-        return
-
-    all_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
-    all_found = []
-
-    for layer in all_layers:
-        all_found.extend(find_layer(layer, user_prompt))
-
-    if all_found:
-        for layer in all_found:
-            print(f"Replacing '{layer.get_name()}' with '{replacement_text}'.")
-            layer.set_name(replacement_text)
-
-        print(f"[Python] Replaced {len(all_found)} layer(s) with the new name '{replacement_text}'.")
+    items = get_current_items()
+    if items:
+        for item in items[:]:  # Work on a copy of the list
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all {current_view.replace('_', ' ')} names with '{replacement_text}'.")
     else:
-        print(f"[Python] No layers found with the name starting with '{user_prompt}'.")
+        print("[Python] No valid items to replace.")
 
-# Function to update the state of the Replace and Replace All buttons
-def update_button_states():
-    global matched_layers, replace_button, replace_all_button
-
-    stack = substance_painter.textureset.get_active_stack()  # Get the active stack
-    if not stack:
-        print("[Python] No active texture set stack found.")
+def on_layer_stack_changed(*args):
+    if not substance_painter.project.is_open():
         return
+    if plugin_widgets:
+        prompt_input = plugin_widgets[0].findChild(QtWidgets.QLineEdit)
+        status_display = plugin_widgets[0].findChild(QtWidgets.QLabel)
+        if prompt_input and status_display:
+            update_search_results(prompt_input.text().strip(), status_display)
+            select_current_item(status_display, should_select=False)
 
-    selected_nodes = substance_painter.layerstack.get_selected_nodes(stack)  # Pass the stack to get_selected_nodes()
+def create_collapsible_section(title, content_widget):
+    container = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
 
-    if len(selected_nodes) == 1:
-        replace_button.setEnabled(True)
-        replace_all_button.setEnabled(False)
-    elif len(selected_nodes) > 1:
-        replace_button.setEnabled(False)
-        replace_all_button.setEnabled(True)
-    else:
-        replace_button.setEnabled(False)
-        replace_all_button.setEnabled(False)
+    toggle_button = QtWidgets.QToolButton()
+    toggle_button.setStyleSheet("QToolButton { border: none; }")
+    toggle_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+    toggle_button.setArrowType(QtCore.Qt.RightArrow)
+    toggle_button.setText(title)
+    toggle_button.setCheckable(True)
+    toggle_button.setChecked(False)
+    toggle_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
 
-# Define the plugin's main functionality
-def start_plugin():
-    if not plugin_widgets:  # Check if the UI is already created
-        create_ui()
-    else:
-        print("[Python] UI is already created.")
+    collapsible_widget = QtWidgets.QWidget()
+    collapsible_layout = QtWidgets.QVBoxLayout(collapsible_widget)
+    collapsible_layout.setContentsMargins(15, 0, 0, 0)
+    collapsible_layout.addWidget(content_widget)
+    collapsible_widget.setVisible(False)
+
+    def toggle_collapsible():
+        visible = toggle_button.isChecked()
+        collapsible_widget.setVisible(visible)
+        toggle_button.setArrowType(QtCore.Qt.DownArrow if visible else QtCore.Qt.RightArrow)
+
+    toggle_button.toggled.connect(toggle_collapsible)
+
+    layout.addWidget(toggle_button)
+    layout.addWidget(collapsible_widget)
+
+    container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+
+    return container, collapsible_layout
+
+def create_view_switch_button(display_text, default=False):
+    button = QtWidgets.QPushButton(display_text)
+    button.setCheckable(True)
+    button.setChecked(default)
+    button.setEnabled(not default)
+    return button
 
 def create_ui():
-    global prompt_input, replace_input, count_display, replace_button, replace_all_button  # Access the global variables
-
-    if prompt_input is not None:
+    global plugin_widgets, replace_input
+    if plugin_widgets:
         print("[Python] UI is already created.")
         return
 
     main_widget = QtWidgets.QWidget()
-    main_widget.setWindowTitle("Name Search")
+    main_widget.setWindowTitle("Search")
     main_layout = QtWidgets.QVBoxLayout(main_widget)
 
-    # Top buttons layout
     top_buttons_layout = QtWidgets.QHBoxLayout()
+    status_display = QtWidgets.QLabel("0 out of 0")
+    status_display.setAlignment(QtCore.Qt.AlignCenter)
 
-    layers_button = QtWidgets.QPushButton("Layers")
-    layers_button.setCheckable(True)
-    layers_button.setChecked(True)  # Default to Layers view
-    layers_button.setEnabled(False)  # Grey out the Layers button by default
-    layers_button.clicked.connect(lambda: switch_view("layers", layers_button, effects_button))
-    top_buttons_layout.addWidget(layers_button)
+    # Create view switch buttons using a mapping.
+    view_names = [("Layers", "layers"), ("Layer Effects", "content_effects"), ("Mask Effects", "mask_effects")]
+    buttons = {}
+    for display_text, view_key in view_names:
+        default = (view_key == "layers")
+        btn = create_view_switch_button(display_text, default)
+        buttons[view_key] = btn
 
-    effects_button = QtWidgets.QPushButton("Effects")
-    effects_button.setCheckable(True)
-    effects_button.setChecked(False)
-    effects_button.clicked.connect(lambda: switch_view("effects", layers_button, effects_button))
-    top_buttons_layout.addWidget(effects_button)
+    # Connect buttons explicitly to avoid lambda late-binding issues.
+    buttons["layers"].clicked.connect(
+        lambda: switch_view("layers", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
+    buttons["content_effects"].clicked.connect(
+        lambda: switch_view("content_effects", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
+    buttons["mask_effects"].clicked.connect(
+        lambda: switch_view("mask_effects", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
 
+    top_buttons_layout.addWidget(buttons["layers"])
+    top_buttons_layout.addWidget(buttons["content_effects"])
+    top_buttons_layout.addWidget(buttons["mask_effects"])
     main_layout.addLayout(top_buttons_layout)
 
-    # Main UI layout for Layers functionality
-    text_fields_layout = QtWidgets.QHBoxLayout()
-
-    find_layout = QtWidgets.QVBoxLayout()
-    find_label = QtWidgets.QLabel("Find")
-    find_label.setAlignment(QtCore.Qt.AlignLeft)
-    find_layout.addWidget(find_label)
-
+    # Find section
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
-    prompt_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-    prompt_input.textChanged.connect(handle_text_change)
-    find_layout.addWidget(prompt_input)
-
-    text_fields_layout.addLayout(find_layout)
-
-    divider = QtWidgets.QFrame()
-    divider.setFrameShape(QtWidgets.QFrame.VLine)
-    divider.setFrameShadow(QtWidgets.QFrame.Sunken)
-    text_fields_layout.addWidget(divider)
-
-    replace_layout = QtWidgets.QVBoxLayout()
-    replace_label = QtWidgets.QLabel("Replace")
-    replace_label.setAlignment(QtCore.Qt.AlignLeft)
-    replace_layout.addWidget(replace_label)
-
-    replace_input = QtWidgets.QLineEdit()
-    replace_input.setPlaceholderText("Enter replacement text...")
-    replace_input.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-    replace_layout.addWidget(replace_input)
-
-    text_fields_layout.addLayout(replace_layout)
-    main_layout.addLayout(text_fields_layout)
 
     navigation_layout = QtWidgets.QHBoxLayout()
     prev_button = QtWidgets.QPushButton("<")
-    prev_button.clicked.connect(lambda: navigate_layers(-1))  # Navigate to previous layer
+    prev_button.clicked.connect(lambda: navigate(-1, status_display))
     navigation_layout.addWidget(prev_button)
-
     next_button = QtWidgets.QPushButton(">")
-    next_button.clicked.connect(lambda: navigate_layers(1))  # Navigate to next layer
+    next_button.clicked.connect(lambda: navigate(1, status_display))
     navigation_layout.addWidget(next_button)
-    main_layout.addLayout(navigation_layout)
+
+    find_widget = QtWidgets.QWidget()
+    find_layout = QtWidgets.QVBoxLayout(find_widget)
+    find_layout.setContentsMargins(0, 0, 0, 0)
+    find_layout.addWidget(prompt_input)
+    find_layout.addLayout(navigation_layout)
+
+    find_section, _ = create_collapsible_section("Find", find_widget)
+    main_layout.addWidget(find_section)
+
+    # Replace section
+    replace_input = QtWidgets.QLineEdit()
+    replace_input.setPlaceholderText("Type replacement text...")
+
+    replace_widget = QtWidgets.QWidget()
+    replace_layout = QtWidgets.QVBoxLayout(replace_widget)
+    replace_layout.setContentsMargins(0, 0, 0, 0)
+    replace_layout.addWidget(replace_input)
 
     replace_buttons_layout = QtWidgets.QHBoxLayout()
     replace_button = QtWidgets.QPushButton("Replace")
-    replace_button.clicked.connect(replace_current_layer)  # Replace current layer name
-    replace_buttons_layout.addWidget(replace_button)
-
+    replace_button.clicked.connect(replace_current_item)
     replace_all_button = QtWidgets.QPushButton("Replace All")
-    replace_all_button.clicked.connect(replace_name)  # Attach the replace_name function
+    replace_all_button.clicked.connect(replace_all_items)
+    replace_buttons_layout.addWidget(replace_button)
     replace_buttons_layout.addWidget(replace_all_button)
+    replace_layout.addLayout(replace_buttons_layout)
 
-    main_layout.addLayout(replace_buttons_layout)
+    replace_section, _ = create_collapsible_section("Replace", replace_widget)
+    main_layout.addWidget(replace_section)
 
-    toggle_button = QtWidgets.QPushButton("Hide Stats")
-    toggle_button.setCheckable(True)
-    toggle_button.clicked.connect(lambda: toggle_counts_visibility(toggle_button))
-    main_layout.addWidget(toggle_button)
+    prompt_input.textChanged.connect(lambda: search_items(prompt_input, status_display))
+    QtCore.QTimer.singleShot(0, lambda: search_items(prompt_input, status_display))
 
-    count_layout = QtWidgets.QVBoxLayout()
-    count_display = QtWidgets.QLabel("Fill Layers: 0, Paint Layers: 0, Group Folders: 0")
-    count_display.setAlignment(QtCore.Qt.AlignCenter)
-    count_layout.addWidget(count_display)
-    main_layout.addLayout(count_layout)
+    main_layout.addWidget(status_display)
     main_layout.addStretch()
 
     substance_painter.ui.add_dock_widget(main_widget)
     plugin_widgets.append(main_widget)
 
-    update_button_states()  # Ensure buttons are correctly initialized
     print("[Python] UI created successfully.")
 
-def switch_view(view, layers_button, effects_button):
-    if view == "layers":
-        layers_button.setChecked(True)
-        layers_button.setEnabled(False)  # Grey out the Layers button
-        effects_button.setChecked(False)
-        effects_button.setEnabled(True)  # Enable the Effects button
-        print("[Python] Switched to Layers view.")
-        # Implement functionality for showing Layers-related UI elements
-    elif view == "effects":
-        layers_button.setChecked(False)
-        layers_button.setEnabled(True)  # Enable the Layers button
-        effects_button.setChecked(True)
-        effects_button.setEnabled(False)  # Grey out the Effects button
-        print("[Python] Switched to Effects view.")
-        # Implement functionality for showing Effects-related UI elements
-
-def toggle_counts_visibility(button):
-    global count_display
-    if count_display.isVisible():
-        count_display.setVisible(False)
-        button.setText("Show Stats")
-    else:
-        count_display.setVisible(True)
-        button.setText("Hide Stats")
+def start_plugin():
+    create_ui()
+    substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
+    print("Plugin started")
 
 def close_plugin():
     for widget in plugin_widgets:
         substance_painter.ui.delete_ui_element(widget)
     plugin_widgets.clear()
-
-def initialize_plugin():
-    print("[Python] Initializing plugin...")
-    create_ui()
-    print("[Python] Plugin initialized.")
+    substance_painter.event.DISPATCHER.disconnect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
+    print("[Python] Plugin closed.")
 
 if __name__ == "__main__":
-    initialize_plugin()
+    start_plugin()
