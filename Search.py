@@ -16,7 +16,6 @@ replace_input = None
 
 def uid(node):
     return node.uid() if hasattr(node, 'uid') else id(node)
-
 def find_items(layer, substring):
     found_content_effects = []
     found_mask_effects = []
@@ -70,10 +69,10 @@ def update_search_results(substring, status_display):
         found_content_effects.clear()
         found_mask_effects.clear()
         substance_painter.layerstack.set_selected_nodes([])
-
-        # Just refresh the status display with existing index
         update_status_display(status_display)
         return
+
+    old_lengths = (len(found_layers), len(found_content_effects), len(found_mask_effects))
 
     new_layers = []
     new_content_effects = []
@@ -92,15 +91,15 @@ def update_search_results(substring, status_display):
     found_content_effects[:] = new_content_effects
     found_mask_effects[:] = new_mask_effects
 
-    # If the current index is now out of range due to fewer results, adjust safely
+    new_lengths = (len(found_layers), len(found_content_effects), len(found_mask_effects))
     items = found_layers if current_view == "layers" else found_content_effects if current_view == "content_effects" else found_mask_effects
-    if current_index >= len(items):
-        current_index = len(items) - 1 if items else -1
-        
-    if current_index == -1 and items:
-        current_index = 0
+
+    if new_lengths != old_lengths:
+        current_index = 0 if items else -1
         select_current_item(status_display, should_select=True)
     else:
+        if current_index >= len(items):
+            current_index = len(items) - 1 if items else -1
         update_status_display(status_display)
 
 def select_current_item(status_display, should_select=True):
@@ -119,6 +118,7 @@ def select_current_item(status_display, should_select=True):
 
     if should_select:
         substance_painter.layerstack.set_selected_nodes(selection)
+        
     update_status_display(status_display)
 
 def update_status_display(status_display):
@@ -165,9 +165,10 @@ def replace_current_item():
     else:
         print("[Python] No valid selection to replace.")
         return
-
+    
     current_item.set_name(replacement_text)
-    print(f"[Python] Replaced current {current_view[:-1]} name with '{replacement_text}'.")
+    
+    #print(f"[Python] Replaced current {current_view[:-1]} name with '{replacement_text}'.")
 def replace_all_items():
     global current_view, found_layers, found_content_effects, found_mask_effects, replace_input
 
@@ -329,8 +330,6 @@ def create_ui():
     plugin_widgets.append(main_widget)
 
     print("[Python] UI created successfully.")
-
-# ... (rest of the plugin lifecycle functions remain the same) ...
     
 def start_plugin():
     create_ui()
