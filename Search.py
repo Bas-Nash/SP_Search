@@ -18,55 +18,37 @@ def uid(node):
     return node.uid() if hasattr(node, 'uid') else id(node)
 
 def find_items(layer, substring):
-    # Cache the lower-case version of the substring
-    substring_lower = substring.lower()
     found_content_effects = []
     found_mask_effects = []
-    found_layers_local = []  # Renamed variable to avoid conflict with the global list
+    found_layers = []
 
-    if substring_lower in layer.get_name().lower():
-        found_layers_local.append(layer)
+    if substring.lower() in layer.get_name().lower():
+        found_layers.append(layer)
 
     for effect in layer.content_effects():
-        if substring_lower in effect.get_name().lower():
+        if substring.lower() in effect.get_name().lower():
             found_content_effects.append(effect)
 
     if layer.has_mask():
         for effect in layer.mask_effects():
-            if substring_lower in effect.get_name().lower():
+            if substring.lower() in effect.get_name().lower():
                 found_mask_effects.append(effect)
 
     if layer.get_type() == substance_painter.layerstack.NodeType.GroupLayer:
         for sub_layer in layer.sub_layers():
-            sub_content, sub_mask, sub_layers = find_items(sub_layer, substring)
-            found_content_effects.extend(sub_content)
-            found_mask_effects.extend(sub_mask)
-            found_layers_local.extend(sub_layers)
+            sub_content_effects, sub_mask_effects, sub_layers = find_items(sub_layer, substring)
+            found_content_effects.extend(sub_content_effects)
+            found_mask_effects.extend(sub_mask_effects)
+            found_layers.extend(sub_layers)
 
-    return found_content_effects, found_mask_effects, found_layers_local
-
-def get_current_items():
-    mapping = {
-        "layers": found_layers,
-        "content_effects": found_content_effects,
-        "mask_effects": found_mask_effects,
-    }
-    return mapping.get(current_view, [])
-
-def require_project_open(func):
-    def wrapper(*args, **kwargs):
-        if not substance_painter.project.is_open():
-            return
-        return func(*args, **kwargs)
-    return wrapper
+    return found_content_effects, found_mask_effects, found_layers
 
 def switch_view(view, layers_button, content_button, mask_button, status_display):
     global current_view, current_index
     current_view = view
-    items = get_current_items()
+    items = found_layers if view == "layers" else found_content_effects if view == "content_effects" else found_mask_effects
     current_index = 0 if items else -1
 
-    # Nested helper to toggle button states
     def toggle(button, active):
         button.setChecked(active)
         button.setEnabled(not active)
@@ -77,16 +59,16 @@ def switch_view(view, layers_button, content_button, mask_button, status_display
 
     select_current_item(status_display)
 
-@require_project_open
 def update_search_results(substring, status_display):
     global found_layers, found_content_effects, found_mask_effects, current_index, current_view
 
-    # If search string is empty, clear all results.
+    if not substance_painter.project.is_open():
+        return
+
     if not substring.strip():
         found_layers.clear()
         found_content_effects.clear()
         found_mask_effects.clear()
-        substance_painter.layerstack.set_selected_nodes([])
         update_status_display(status_display)
         return
 
@@ -100,17 +82,17 @@ def update_search_results(substring, status_display):
     root_layers = substance_painter.layerstack.get_root_layer_nodes(stack)
 
     for layer in root_layers:
-        content, mask, layers_found = find_items(layer, substring)
+        content, mask, layers = find_items(layer, substring)
         new_content_effects.extend(content)
         new_mask_effects.extend(mask)
-        new_layers.extend(layers_found)
+        new_layers.extend(layers)
 
     found_layers[:] = new_layers
     found_content_effects[:] = new_content_effects
     found_mask_effects[:] = new_mask_effects
 
     new_lengths = (len(found_layers), len(found_content_effects), len(found_mask_effects))
-    items = get_current_items()
+    items = found_layers if current_view == "layers" else found_content_effects if current_view == "content_effects" else found_mask_effects
 
     if new_lengths != old_lengths:
         current_index = 0 if items else -1
@@ -120,29 +102,41 @@ def update_search_results(substring, status_display):
             current_index = len(items) - 1 if items else -1
         update_status_display(status_display)
 
-@require_project_open
 def select_current_item(status_display, should_select=True):
-    global current_index
-    items = get_current_items()
-    selection = [items[current_index]] if items and current_index >= 0 else []
-    
+    global current_index, current_view
+
+    if not substance_painter.project.is_open():
+        return
+
+    selection = []
+    if current_view == "layers" and found_layers:
+        selection = [found_layers[current_index]]
+    elif current_view == "content_effects" and found_content_effects:
+        selection = [found_content_effects[current_index]]
+    elif current_view == "mask_effects" and found_mask_effects:
+        selection = [found_mask_effects[current_index]]
+
     if should_select:
         substance_painter.layerstack.set_selected_nodes(selection)
-    
+        
+    print(f"Current Layer: '{selection}'")
     update_status_display(status_display)
 
 def update_status_display(status_display):
-    items = get_current_items()
-    total_items = len(items)
+    global current_index, current_view
+    total_items = len(found_layers if current_view == "layers" else found_content_effects if current_view == "content_effects" else found_mask_effects)
     if total_items > 0 and current_index >= 0:
         status_display.setText(f"{current_index + 1} out of {total_items}")
     else:
         status_display.setText("0 out of 0")
 
-@require_project_open
 def navigate(direction, status_display):
-    global current_index
-    items = get_current_items()
+    global current_index, current_view
+
+    if not substance_painter.project.is_open():
+        return
+
+    items = found_layers if current_view == "layers" else found_content_effects if current_view == "content_effects" else found_mask_effects
     if items:
         current_index = (current_index + direction) % len(items)
     select_current_item(status_display, should_select=True)
@@ -152,7 +146,8 @@ def search_items(prompt_input, status_display):
     select_current_item(status_display, should_select=True)
 
 def replace_current_item():
-    global current_index, replace_input
+    global current_index, current_view, found_layers, found_content_effects, found_mask_effects, replace_input
+
     if replace_input is None or current_index == -1:
         print("[Python] No active selection or replace field not initialized.")
         return
@@ -162,15 +157,22 @@ def replace_current_item():
         print("[Python] Replacement field must be filled.")
         return
 
-    items = get_current_items()
-    if items:
-        current_item = items[current_index]
-        current_item.set_name(replacement_text)
+    if current_view == "layers" and found_layers:
+        current_item = found_layers[current_index]
+    elif current_view == "content_effects" and found_content_effects:
+        current_item = found_content_effects[current_index]
+    elif current_view == "mask_effects" and found_mask_effects:
+        current_item = found_mask_effects[current_index]
     else:
         print("[Python] No valid selection to replace.")
-
+        return
+    
+    current_item.set_name(replacement_text)
+    
+    #print(f"[Python] Replaced current {current_view[:-1]} name with '{replacement_text}'.")
 def replace_all_items():
-    global replace_input
+    global current_view, found_layers, found_content_effects, found_mask_effects, replace_input
+
     if replace_input is None:
         print("[Python] Replace field not initialized.")
         return
@@ -180,14 +182,25 @@ def replace_all_items():
         print("[Python] Replacement field must be filled.")
         return
 
-    items = get_current_items()
-    if items:
-        for item in items[:]:  # Work on a copy of the list
+    # Copy the list to iterate on a snapshot of the items.
+    if current_view == "layers" and found_layers:
+        items_to_replace = found_layers[:]  # Create a shallow copy
+        for item in items_to_replace:
             item.set_name(replacement_text)
-        print(f"[Python] Replaced all {current_view.replace('_', ' ')} names with '{replacement_text}'.")
+        print(f"[Python] Replaced all layer names with '{replacement_text}'.")
+    elif current_view == "content_effects" and found_content_effects:
+        items_to_replace = found_content_effects[:]
+        for item in items_to_replace:
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all content effect names with '{replacement_text}'.")
+    elif current_view == "mask_effects" and found_mask_effects:
+        items_to_replace = found_mask_effects[:]
+        for item in items_to_replace:
+            item.set_name(replacement_text)
+        print(f"[Python] Replaced all mask effect names with '{replacement_text}'.")
     else:
         print("[Python] No valid items to replace.")
-
+        
 def on_layer_stack_changed(*args):
     if not substance_painter.project.is_open():
         return
@@ -231,16 +244,9 @@ def create_collapsible_section(title, content_widget):
     container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
 
     return container, collapsible_layout
-
-def create_view_switch_button(display_text, default=False):
-    button = QtWidgets.QPushButton(display_text)
-    button.setCheckable(True)
-    button.setChecked(default)
-    button.setEnabled(not default)
-    return button
-
 def create_ui():
     global plugin_widgets, replace_input
+
     if plugin_widgets:
         print("[Python] UI is already created.")
         return
@@ -250,28 +256,27 @@ def create_ui():
     main_layout = QtWidgets.QVBoxLayout(main_widget)
 
     top_buttons_layout = QtWidgets.QHBoxLayout()
+    def create_view_switch_button(name):
+        button = QtWidgets.QPushButton(name)
+        button.setCheckable(True)
+        button.setChecked(name == "Layers")
+        button.setEnabled(name != "Layers")
+        return button
+
+    layers_button = create_view_switch_button("Layers")
+    layer_effects_button = create_view_switch_button("Layer Effects")
+    mask_effects_button = create_view_switch_button("Mask Effects")
+
     status_display = QtWidgets.QLabel("0 out of 0")
     status_display.setAlignment(QtCore.Qt.AlignCenter)
 
-    # Create view switch buttons using a mapping.
-    view_names = [("Layers", "layers"), ("Layer Effects", "content_effects"), ("Mask Effects", "mask_effects")]
-    buttons = {}
-    for display_text, view_key in view_names:
-        default = (view_key == "layers")
-        btn = create_view_switch_button(display_text, default)
-        buttons[view_key] = btn
+    layers_button.clicked.connect(lambda: switch_view("layers", layers_button, layer_effects_button, mask_effects_button, status_display))
+    layer_effects_button.clicked.connect(lambda: switch_view("content_effects", layers_button, layer_effects_button, mask_effects_button, status_display))
+    mask_effects_button.clicked.connect(lambda: switch_view("mask_effects", layers_button, layer_effects_button, mask_effects_button, status_display))
 
-    # Connect buttons explicitly to avoid lambda late-binding issues.
-    buttons["layers"].clicked.connect(
-        lambda: switch_view("layers", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
-    buttons["content_effects"].clicked.connect(
-        lambda: switch_view("content_effects", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
-    buttons["mask_effects"].clicked.connect(
-        lambda: switch_view("mask_effects", buttons["layers"], buttons["content_effects"], buttons["mask_effects"], status_display))
-
-    top_buttons_layout.addWidget(buttons["layers"])
-    top_buttons_layout.addWidget(buttons["content_effects"])
-    top_buttons_layout.addWidget(buttons["mask_effects"])
+    top_buttons_layout.addWidget(layers_button)
+    top_buttons_layout.addWidget(layer_effects_button)
+    top_buttons_layout.addWidget(mask_effects_button)
     main_layout.addLayout(top_buttons_layout)
 
     # Find section
@@ -326,7 +331,7 @@ def create_ui():
     plugin_widgets.append(main_widget)
 
     print("[Python] UI created successfully.")
-
+    
 def start_plugin():
     create_ui()
     substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
@@ -338,6 +343,6 @@ def close_plugin():
     plugin_widgets.clear()
     substance_painter.event.DISPATCHER.disconnect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
     print("[Python] Plugin closed.")
-
+    
 if __name__ == "__main__":
     start_plugin()
