@@ -1,4 +1,5 @@
 import os
+import re
 import substance_painter.ui
 import substance_painter.project
 import substance_painter.textureset
@@ -13,6 +14,10 @@ found_content_effects = []
 found_mask_effects = []
 current_index = -1
 replace_input = None
+
+# NEW: keep references so replace handlers can read the find term and refresh status
+find_input = None
+status_label = None
 
 def uid(node):
     return node.uid() if hasattr(node, 'uid') else id(node)
@@ -118,7 +123,7 @@ def select_current_item(status_display, should_select=True):
 
     if should_select:
         substance_painter.layerstack.set_selected_nodes(selection)
-        
+
     print(f"Current Layer: '{selection}'")
     update_status_display(status_display)
 
@@ -145,71 +150,121 @@ def search_items(prompt_input, status_display):
     update_search_results(prompt_input.text().strip(), status_display)
     select_current_item(status_display, should_select=True)
 
-def replace_current_item():
-    global current_index, current_view, found_layers, found_content_effects, found_mask_effects, replace_input
+# ---------- NEW: substring replacement helper ----------
+def replace_substring_in_name(name, search, replacement, case_sensitive=False):
+    """
+    Returns name with only the matched substring replaced (not the entire name).
+    Case-insensitive by default. Escapes regex in 'search'.
+    """
+    if not search:
+        return name
+    flags = 0 if case_sensitive else re.IGNORECASE
+    pattern = re.escape(search)
+    return re.sub(pattern, replacement, name, flags=flags)
 
-    if replace_input is None or current_index == -1:
-        print("[Python] No active selection or replace field not initialized.")
+def _get_current_item():
+    if current_view == "layers" and found_layers:
+        return found_layers[current_index]
+    elif current_view == "content_effects" and found_content_effects:
+        return found_content_effects[current_index]
+    elif current_view == "mask_effects" and found_mask_effects:
+        return found_mask_effects[current_index]
+    return None
+
+def _refresh_after_rename():
+    # Re-run the search and keep selection sane after renames
+    if status_label is not None and find_input is not None:
+        update_search_results(find_input.text().strip(), status_label)
+        select_current_item(status_label, should_select=False)
+
+def replace_current_item():
+    global replace_input, find_input
+
+    if replace_input is None or find_input is None:
+        print("[Python] Replace or Find field not initialized.")
         return
-    
+    if current_index == -1:
+        print("[Python] No active selection.")
+        return
+
+    search_text = find_input.text().strip()
     replacement_text = replace_input.text().strip()
+
+    if not search_text:
+        print("[Python] Find field is empty; nothing to replace.")
+        return
     if not replacement_text:
         print("[Python] Replacement field must be filled.")
         return
 
-    if current_view == "layers" and found_layers:
-        current_item = found_layers[current_index]
-    elif current_view == "content_effects" and found_content_effects:
-        current_item = found_content_effects[current_index]
-    elif current_view == "mask_effects" and found_mask_effects:
-        current_item = found_mask_effects[current_index]
-    else:
+    current_item = _get_current_item()
+    if not current_item:
         print("[Python] No valid selection to replace.")
         return
-    
-    current_item.set_name(replacement_text)
-    
-    #print(f"[Python] Replaced current {current_view[:-1]} name with '{replacement_text}'.")
-def replace_all_items():
-    global current_view, found_layers, found_content_effects, found_mask_effects, replace_input
 
-    if replace_input is None:
-        print("[Python] Replace field not initialized.")
+    old_name = current_item.get_name()
+    new_name = replace_substring_in_name(old_name, search_text, replacement_text, case_sensitive=False)
+
+    if old_name != new_name:
+        current_item.set_name(new_name)
+        print(f"[Python] Renamed '{old_name}' → '{new_name}'.")
+        _refresh_after_rename()
+    else:
+        print(f"[Python] No occurrences of '{search_text}' found in '{old_name}'.")
+
+def replace_all_items():
+    global replace_input, find_input
+
+    if replace_input is None or find_input is None:
+        print("[Python] Replace or Find field not initialized.")
         return
 
+    search_text = find_input.text().strip()
     replacement_text = replace_input.text().strip()
+
+    if not search_text:
+        print("[Python] Find field is empty; nothing to replace.")
+        return
     if not replacement_text:
         print("[Python] Replacement field must be filled.")
         return
 
-    # Copy the list to iterate on a snapshot of the items.
     if current_view == "layers" and found_layers:
-        items_to_replace = found_layers[:]  # Create a shallow copy
-        for item in items_to_replace:
-            item.set_name(replacement_text)
-        print(f"[Python] Replaced all layer names with '{replacement_text}'.")
+        items_to_replace = found_layers[:]
     elif current_view == "content_effects" and found_content_effects:
         items_to_replace = found_content_effects[:]
-        for item in items_to_replace:
-            item.set_name(replacement_text)
-        print(f"[Python] Replaced all content effect names with '{replacement_text}'.")
     elif current_view == "mask_effects" and found_mask_effects:
         items_to_replace = found_mask_effects[:]
-        for item in items_to_replace:
-            item.set_name(replacement_text)
-        print(f"[Python] Replaced all mask effect names with '{replacement_text}'.")
     else:
         print("[Python] No valid items to replace.")
-        
+        return
+
+    changes = 0
+    for item in items_to_replace:
+        old_name = item.get_name()
+        new_name = replace_substring_in_name(old_name, search_text, replacement_text, case_sensitive=False)
+        if old_name != new_name:
+            item.set_name(new_name)
+            changes += 1
+
+    print(f"[Python] Updated {changes} item(s) with '{search_text}' → '{replacement_text}'.")
+    _refresh_after_rename()
+
 def on_layer_stack_changed(*args):
     if not substance_painter.project.is_open():
         return
     if plugin_widgets:
-        prompt_input = plugin_widgets[0].findChild(QtWidgets.QLineEdit)
-        status_display = plugin_widgets[0].findChild(QtWidgets.QLabel)
-        if prompt_input and status_display:
-            update_search_results(prompt_input.text().strip(), status_display)
-            select_current_item(status_display, should_select=False)
+        # use stored refs if present
+        if find_input and status_label:
+            update_search_results(find_input.text().strip(), status_label)
+            select_current_item(status_label, should_select=False)
+        else:
+            # fallback
+            prompt_input = plugin_widgets[0].findChild(QtWidgets.QLineEdit)
+            status_display = plugin_widgets[0].findChild(QtWidgets.QLabel)
+            if prompt_input and status_display:
+                update_search_results(prompt_input.text().strip(), status_display)
+                select_current_item(status_display, should_select=False)
 
 def create_collapsible_section(title, content_widget):
     container = QtWidgets.QWidget()
@@ -244,8 +299,9 @@ def create_collapsible_section(title, content_widget):
     container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
 
     return container, collapsible_layout
+
 def create_ui():
-    global plugin_widgets, replace_input
+    global plugin_widgets, replace_input, find_input, status_label
 
     if plugin_widgets:
         print("[Python] UI is already created.")
@@ -269,6 +325,7 @@ def create_ui():
 
     status_display = QtWidgets.QLabel("0 out of 0")
     status_display.setAlignment(QtCore.Qt.AlignCenter)
+    status_label = status_display  # store
 
     layers_button.clicked.connect(lambda: switch_view("layers", layers_button, layer_effects_button, mask_effects_button, status_display))
     layer_effects_button.clicked.connect(lambda: switch_view("content_effects", layers_button, layer_effects_button, mask_effects_button, status_display))
@@ -282,6 +339,7 @@ def create_ui():
     # Find section
     prompt_input = QtWidgets.QLineEdit()
     prompt_input.setPlaceholderText("Type your prompt here...")
+    find_input = prompt_input  # store
 
     navigation_layout = QtWidgets.QHBoxLayout()
     prev_button = QtWidgets.QPushButton("<")
@@ -331,7 +389,7 @@ def create_ui():
     plugin_widgets.append(main_widget)
 
     print("[Python] UI created successfully.")
-    
+
 def start_plugin():
     create_ui()
     substance_painter.event.DISPATCHER.connect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
@@ -343,6 +401,6 @@ def close_plugin():
     plugin_widgets.clear()
     substance_painter.event.DISPATCHER.disconnect(substance_painter.event.LayerStacksModelDataChanged, on_layer_stack_changed)
     print("[Python] Plugin closed.")
-    
+
 if __name__ == "__main__":
     start_plugin()
