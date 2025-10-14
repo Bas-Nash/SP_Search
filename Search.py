@@ -5,7 +5,16 @@ import substance_painter.project
 import substance_painter.textureset
 import substance_painter.layerstack
 import substance_painter.event
-from PySide2 import QtGui, QtWidgets, QtCore
+
+IsQt5 = substance_painter.application.version_info() < (10,1,0)
+if IsQt5 :
+    from PySide2 import QtGui
+    from PySide2 import QtCore
+    from PySide2 import QtWidgets
+else :
+    from PySide6 import QtGui
+    from PySide6 import QtCore
+    from PySide6 import QtWidgets
 
 plugin_widgets = []
 current_view = "layers"
@@ -14,8 +23,6 @@ found_content_effects = []
 found_mask_effects = []
 current_index = -1
 replace_input = None
-
-# NEW: keep references so replace handlers can read the find term and refresh status
 find_input = None
 status_label = None
 
@@ -150,12 +157,7 @@ def search_items(prompt_input, status_display):
     update_search_results(prompt_input.text().strip(), status_display)
     select_current_item(status_display, should_select=True)
 
-# ---------- NEW: substring replacement helper ----------
 def replace_substring_in_name(name, search, replacement, case_sensitive=False):
-    """
-    Returns name with only the matched substring replaced (not the entire name).
-    Case-insensitive by default. Escapes regex in 'search'.
-    """
     if not search:
         return name
     flags = 0 if case_sensitive else re.IGNORECASE
