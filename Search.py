@@ -13,12 +13,30 @@ else:
     from PySide6 import QtGui, QtCore, QtWidgets
 
 plugin_widgets = []
-found_items = []
+
+# Lists to store the matching layers and effects(content effects and mask effects)
+found_layers = []
+found_content_effects = []
+found_mask_effects = []
+
+# Combined and sorted list used for navigating to the top and bottom of the stack 
+combined_results = []  
+
+#Global Variables
 current_index = -1
 replace_input = None
 find_input = None
 status_label = None
+last_stack_key = None
 
+# Specifically to track effects inside of fill layers workaround from how the API Navigates from effects > mask effects and vice versa
+# uid effects of the parent layer
+effect_parent_map = {}
+mask_effect_parent_map = {}
+node_category = {}     
+last_item_category = None   
+
+# Shorter Variables for each Module
 _LS = substance_painter.layerstack
 _TS = substance_painter.textureset
 _PR = substance_painter.project
@@ -31,76 +49,159 @@ def uid(node):
     return node.uid() if hasattr(node, "uid") else id(node)
 
 def _active_results_list():
-    # Return the unified search results list
-    global found_items
-    return found_items
+    #Return a single combined list of all found items in top-to-bottom stack order.
+    return combined_results
+
+def _get_active_stack_key():
+    #Returns a tuple uniquely identifying the currently active stack:
+    try:
+        stack = _TS.get_active_stack()
+        if stack is None:
+            return None
+        # TextureSet name
+        material = stack.material()
+        mat_name = material.name() if hasattr(material, "name") else None
+        # Stack name (empty string for non-layered materials)
+        try:
+            stack_name = stack.name()
+        except Exception:
+            stack_name = None
+        return (mat_name, stack_name)
+    except Exception:
+        return None
+
+def clear_search_state():
+    # Clear all search results (Find and Replace), and resets navigation state. 
+    # This is so when the user moves to a new stack it doesn't automatically select that layer/effect.
+    global current_index, last_item_category
+    global found_layers, found_content_effects, found_mask_effects, combined_results
+    global node_category, effect_parent_map, mask_effect_parent_map
+    global find_input, replace_input, status_label
+
+    # Clear result lists and parent maps
+    found_layers.clear()
+    found_content_effects.clear()
+    found_mask_effects.clear()
+    combined_results.clear()
+    node_category.clear()
+    effect_parent_map.clear()
+    mask_effect_parent_map.clear()
+    current_index = -1
+    last_item_category = None
+
+    if find_input is not None:
+        find_input.blockSignals(True)
+        find_input.clear()
+        find_input.blockSignals(False)
+
+    if replace_input is not None:
+        replace_input.blockSignals(True)
+        replace_input.clear()
+        replace_input.blockSignals(False)
+
+    if status_label is not None:
+        status_label.setText("0 out of 0")
 
 def _name_contains(node, search_cf):
     # Check if the node name contains the search prompt
     try:
         return search_cf in node.get_name().casefold()
     except Exception:
-        # Ignores odd search types, if any node returns a non-string name
+        # ignores odd search types, if any node returns a non-string name
         name = str(node.get_name())
         return search_cf in name.casefold()
 
-def _sort_top_to_bottom(layers):
-    # Sorts layers in a hierarchy-preserving order from top to bottom.
-    for layer in layers:
-        yield layer
-        if layer.get_type() == _NodeType.GroupLayer:
-            # Recurse into group sub-layers in their order
-            for sub in _sort_top_to_bottom(layer.sub_layers()):
-                yield sub
+def collect_matches(layer, search_cf, layers_acc, content_acc, mask_acc, combined_acc):
+    #Sorts Layer stack from top to bottom and collects matches in this exact order:-
+    #Layers > Content Effects > Mask Effects > Groups (sub_layers)
+
+    # 1. Layer itself
+    if _name_contains(layer, search_cf):
+        layers_acc.append(layer)
+        combined_acc.append(layer)
+        node_category[uid(layer)] = "layer"
+
+    # 2. Content effects
+    for effect in layer.content_effects():
+        if _name_contains(effect, search_cf):
+            content_acc.append(effect)
+            combined_acc.append(effect)
+            u = uid(effect)
+            node_category[u] = "content_effect"
+            effect_parent_map[u] = layer
+
+    # 3. Mask effects
+    if layer.has_mask():
+        for effect in layer.mask_effects():
+            if _name_contains(effect, search_cf):
+                mask_acc.append(effect)
+                combined_acc.append(effect)
+                u = uid(effect)
+                node_category[u] = "mask_effect"
+                mask_effect_parent_map[u] = layer
+
+    # 4. Groups
+    if layer.get_type() == _NodeType.GroupLayer:
+        for child in layer.sub_layers():  # assumed top -> bottom
+            collect_matches(child, search_cf, layers_acc, content_acc, mask_acc, combined_acc)
 
 def update_search_results(substring, status_display):
-    # Reruns the search and updates the UI state with new results
-    global found_items, current_index
+    # Updates the lists when it detects changes in the layer stack. This is different from recording the changes in stack because it records every change which is not helpful.
+    # It returns the updated search results and updates the UI state
+    global found_layers, found_content_effects, found_mask_effects, combined_results, current_index
+    global node_category, effect_parent_map, mask_effect_parent_map, last_item_category
 
     if not _PR.is_open():
         return
 
     s = substring.strip()
     if not s:
-        found_items.clear()
+        found_layers.clear()
+        found_content_effects.clear()
+        found_mask_effects.clear()
+        combined_results.clear()
+        node_category.clear()
+        effect_parent_map.clear()
+        mask_effect_parent_map.clear()
+        last_item_category = None
         update_status_display(status_display)
         return
 
-    old_size = len(found_items)
+    # Capture previous size of lists
+    old_sizes = (len(found_layers), len(found_content_effects), len(found_mask_effects))
 
+    # New lists to slice and accumulate results
+    new_layers = []
+    new_content = []
+    new_mask = []
+    new_combined = []
+
+    # Reset maps
+    node_category.clear()
+    effect_parent_map.clear()
+    mask_effect_parent_map.clear()
+    last_item_category = None
+
+    # retrieves the active layer stack and its root layers
     stack = _TS.get_active_stack()
-    if stack is None:
-        found_items.clear()
-        update_status_display(status_display)
-        return
-
     root_layers = _LS.get_root_layer_nodes(stack)
+
     search_cf = s.casefold()
-    new_items = []
+    # Sorts each root layer in order (top to bottom)
+    for layer in root_layers:
+        collect_matches(layer, search_cf, new_layers, new_content, new_mask, new_combined)
 
-    # Sort the stack top → bottom, respecting hierarchy
-    for layer in _sort_top_to_bottom(root_layers):
-        # 1. The layer itself
-        if _name_contains(layer, search_cf):
-            new_items.append(layer)
+    # splicing and altering the found lists based on new results
+    found_layers[:] = new_layers
+    found_content_effects[:] = new_content
+    found_mask_effects[:] = new_mask
+    combined_results[:] = new_combined  # this drives navigation
 
-        # 2. Its content effects, in their order
-        for effect in layer.content_effects():
-            if _name_contains(effect, search_cf):
-                new_items.append(effect)
-
-        # 3. Its mask effects, if any, in their order
-        if layer.has_mask():
-            for effect in layer.mask_effects():
-                if _name_contains(effect, search_cf):
-                    new_items.append(effect)
-
-    # splice in-place so references stay valid
-    found_items[:] = new_items
-    new_size = len(found_items)
+    # retrieving the new sizes of each list
+    new_sizes = (len(found_layers), len(found_content_effects), len(found_mask_effects))
     items = _active_results_list()
 
-    if new_size != old_size:
+    if new_sizes != old_sizes:
         current_index = 0 if items else -1
         select_current_item(status_display, should_select=True)
     else:
@@ -112,21 +213,60 @@ def update_search_results(substring, status_display):
             current_index = -1
         update_status_display(status_display)
 
+def _get_current_item():
+    # gets the currently selected item in the combined_results list
+    items = _active_results_list()
+    if items and 0 <= current_index < len(items):
+        return items[current_index]
+    return None
+
+def _get_parent_for_node(node, category):
+    # gets the parent layer for an effect/mask effect, or None
+    # as mentioned previously this is workaround from the how the API Navigates from effects > mask effects and vice versa
+    u = uid(node)
+    if category == "content_effect":
+        return effect_parent_map.get(u)
+    elif category == "mask_effect":
+        return mask_effect_parent_map.get(u)
+    return None
+
 def select_current_item(status_display, should_select=True):
     # Selects the current item in the stack and updates status display
+    global last_item_category
+
     if not _PR.is_open():
         return
-
+    
     items = _active_results_list()
-    selection = [items[current_index]] if items and current_index >= 0 else []
+    current_item = items[current_index] if items and current_index >= 0 else None
 
-    if should_select:
-        _LS.set_selected_nodes(selection)
+    #Conditions to check for special condition
+    if should_select and current_item is not None:
+        u = uid(current_item)
+        cat = node_category.get(u)
 
+        # If navigating between effect <-> mask_effect, first select parent layer
+        if (
+            last_item_category in ("content_effect", "mask_effect") and
+            cat in ("content_effect", "mask_effect") and
+            last_item_category != cat
+        ):
+            parent = _get_parent_for_node(current_item, cat)
+            if parent is not None:
+                # First select the parent layer to ensure correct context,
+                # then select the actual child node.
+                _LS.set_selected_nodes([parent])
+
+        # Now select the actual node
+        _LS.set_selected_nodes([current_item])
+        last_item_category = cat
+    else:
+        # If we're not actually selecting in the stack, don't change last_item_category
+        pass
     update_status_display(status_display)
 
 def update_status_display(status_display):
-    # Updates the status display UI with current index and total results
+    # Updates the status display UI with current index and total results of matching layers/effects
     total = len(_active_results_list())
     if total > 0 and current_index >= 0:
         status_display.setText(f"{current_index + 1} out of {total}")
@@ -134,47 +274,37 @@ def update_status_display(status_display):
         status_display.setText("0 out of 0")
 
 def navigate(direction, status_display):
-    # Navigate up or down the unified results list in stack order
+    # Navigate up or down the combined results list
     global current_index
     if not _PR.is_open():
         return
-
     items = _active_results_list()
     if items:
-        # Mod in range with wrap
         current_index = (current_index + direction) % len(items)
-
     select_current_item(status_display, should_select=True)
 
 def search_items(prompt_input, status_display):
-    # Rerun search based on prompt input, then select current item
+    # Calling search function based on prompt initial input or change in the prompt field, and then select current item
     update_search_results(prompt_input.text().strip(), status_display)
     select_current_item(status_display, should_select=True)
 
 def replace_substring_in_name(name, search, replacement, case_sensitive=False):
-    # Replaces the search prompt substring (not the whole name)
+    # replaces the search prompt, not the whole name of the layer/effect, just the substring
     if not search:
         return name
     flags = 0 if case_sensitive else re.IGNORECASE
     pattern = re.escape(search)
     return re.sub(pattern, replacement, name, flags=flags)
 
-def _get_current_item():
-    # Gets the currently selected item in the unified results list
-    items = _active_results_list()
-    if items and 0 <= current_index < len(items):
-        return items[current_index]
-    return None
-
 def _refresh_after_rename():
-    # Applies search again after name changes
+    # Applies search again after prompt name change
     if status_label is not None and find_input is not None:
         update_search_results(find_input.text().strip(), status_label)
         select_current_item(status_label, should_select=False)
 
 def replace_current_item():
-    # Replaces the current selected item's name with the replace field
-    global replace_input, find_input, current_index
+    # replaces the current selected item's name with the replace field
+    global replace_input, find_input
 
     if replace_input is None or find_input is None:
         print("[Python] Replace or Find field not initialized.")
@@ -209,7 +339,7 @@ def replace_current_item():
         print(f"[Python] No occurrences of '{search_text}' found in '{old_name}'.")
 
 def replace_all_items():
-    # Replaces all found items' names with the replace field
+    # replaces all found items' names with the replace field
     global replace_input, find_input
 
     if replace_input is None or find_input is None:
@@ -231,6 +361,7 @@ def replace_all_items():
         print("[Python] No valid items to replace.")
         return
 
+    # Track changes in case the UI selection changes
     changes = 0
     for item in list(items):
         old_name = item.get_name()
@@ -238,13 +369,25 @@ def replace_all_items():
         if old_name != new_name:
             item.set_name(new_name)
             changes += 1
-
-    print(f"[Python] Renamed {changes} item(s).")
     _refresh_after_rename()
+    clear_search_state()
 
-def on_layer_stack_changed(*_args):
+def on_layer_stack_changed(evt):
+    #Called whenever the layer stack changes.
+    global last_stack_key
+
     if not _PR.is_open():
         return
+    
+    current_key = _get_active_stack_key()
+
+    #Condition to check if there is a change in the the stack layer
+    if current_key != last_stack_key:
+        last_stack_key = current_key
+        clear_search_state()
+        return
+
+    #If the stack is the same as before: keep the existing live update functionality
     if plugin_widgets:
         if find_input and status_label:
             update_search_results(find_input.text().strip(), status_label)
@@ -296,12 +439,12 @@ def create_ui():
         print("[Python] UI is already created.")
         return
 
-    # Main Window
+    # Main Window Header
     main_widget = QtWidgets.QWidget()
     main_widget.setWindowTitle("Search")
     main_layout = QtWidgets.QVBoxLayout(main_widget)
 
-    # Status display
+    # Status display (global)
     status_display = QtWidgets.QLabel("0 out of 0")
     status_display.setAlignment(QtCore.Qt.AlignCenter)
     status_label = status_display  # store globally for refresh after rename
@@ -365,10 +508,17 @@ def start_plugin():
     print("Plugin started")
 
 def close_plugin():
+    global last_stack_key
+
     for widget in plugin_widgets:
         _UI.delete_ui_element(widget)
     plugin_widgets.clear()
+
     _EV.DISPATCHER.disconnect(_EV.LayerStacksModelDataChanged, on_layer_stack_changed)
+
+    # Reset stack tracking so next project/session resets
+    last_stack_key = None
+
     print("[Python] Plugin closed.")
 
 if __name__ == "__main__":
